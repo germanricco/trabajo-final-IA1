@@ -5,9 +5,16 @@ import math
 
 class FeatureExtractor:
     def __init__(self):
-        self.features_names = ['area', 'circularity', 'aspect_ratio']
+        self.features_names = [
+            'hu1_compactness',      # Compacidad
+            'hu2_elongation',       # Elongacion/simetria
+            'hu7_symmetry',         # Simetria rotacional
+            'perimeter_area_ratio', # Relacion de perimetro y area
+            'convexity_ratio',      # Presencia de huecos
+            'aspect_ratio'          # Esbeltez
+        ]
 
-    def extract_features(self, original_image: np.ndarray,
+    def extract_features(self,
                          bounding_boxes: List[Tuple],
                          masks: List[np.ndarray]) -> List[Dict]:
 
@@ -15,7 +22,6 @@ class FeatureExtractor:
         Extrae caracteristicas para cada objeto detectado
 
         Args:
-            original_image (np.ndarray): Imagen original
             bounding_boxes (List[Tuple]): Lista de cajas delimitadoras
             masks (List[np.ndarray]): Lista de mascaras
 
@@ -25,152 +31,136 @@ class FeatureExtractor:
 
         features_list = []
 
+        print(f"🚀 INICIANDO EXTRACCION DE CARACTERISTICAS")
         for i, (bbox, mask) in enumerate(zip(bounding_boxes, masks)):
-            print(f"🔍 Analizando objeto {i+1}...")
+            print(f"   🔍 Analizando objeto {i+1}...")
             
             # Extraer características individuales
-            features = self._extract_single_object_features(original_image, bbox, mask, i+1)
+            features = self._extract_single_object_features(bbox, mask, i+1)
             features_list.append(features)
         
         return features_list
 
-    def _extract_single_object_features(self, original_image: np.ndarray,
+    def _extract_single_object_features(self,
                                       bbox: Tuple, 
                                       mask: np.ndarray,
                                       obj_id: int) -> Dict:
         """Extrae características para un solo objeto"""
         x, y, w, h = bbox
         
-        # 1. ÁREA - Número de píxeles en la máscara
+        # Caracteristicas Basicas necesarias
         area = np.sum(mask > 0)
+        perimeter = self._calculate_perimeter(mask)
         
-        # 2. ESBELTEZ - Relación de aspecto del bounding box
-        aspect_ratio = self._calculate_aspect_ratio(w, h)
+        # Caracteristicas Clave
+        hu_moments = self._calculate_discriminative_hu(mask)
+        perimeter_area_ratio = perimeter / (area + 1e-5)
+        convexity_ratio = self._calculate_convexity_ratio(mask)
+        aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
         
-        # 3. REDONDEZ - Qué tan circular es el objeto
-        circularity = self._calculate_circularity(mask)
-        
-        # Crear diccionario de características
+        # Almaceno en directorio
         features = {
             'object_id': obj_id,
-            'area': area,
+            'hu1_compactness': hu_moments['hu1'],
+            'hu2_elongation': hu_moments['hu2'],
+            'hu7_symmetry': hu_moments['hu7'],
+            'perimeter_area_ratio': perimeter_area_ratio,
+            'convexity_ratio': convexity_ratio,
             'aspect_ratio': aspect_ratio,
-            'circularity': circularity,
             'bounding_box': bbox
         }
         
-        # Mostrar resultados en consola
-        self._print_features(obj_id, features)
-        
+        #! Debuggeando imprimo en pantalla 
+        self._print_optimized_features(obj_id, features)
+
         return features
     
-    def _calculate_aspect_ratio(self, width: float, height: float) -> float:
-        """Calcula la relación de aspecto (esbeltez)"""
-        if min(width, height) == 0:
-            return 0
-        return max(width, height) / min(width, height)
-    
-    def _calculate_circularity(self, mask: np.ndarray) -> float:
-        """Calcula la redondez usando la fórmula de circularidad"""
-        # Encontrar contornos en la máscara
+
+    def _calculate_perimeter(self, mask:np.ndarray) -> float:
+        """Calcula el perimetro desde la mascara"""
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+        return cv2.arcLength(contours[0], True) if contours else 0.0
+
+    def _calculate_convexity_ratio(self, mask: np.ndarray) -> float:
+        """Calcula relación de convexidad (área / área_convex_hull)"""
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return 0.0
         
-        # Usar el contorno más grande
-        contour = max(contours, key=cv2.contourArea)
-        
-        # Calcular área y perímetro
+        contour = contours[0]
         area = cv2.contourArea(contour)
-        perimeter = cv2.arcLength(contour, True)
+        hull = cv2.convexHull(contour)
+        hull_area = cv2.contourArea(hull)
         
-        # Fórmula de circularidad: (4 * π * área) / (perímetro²)
-        if perimeter > 0:
-            circularity = (4 * math.pi * area) / (perimeter ** 2)
+        return area / hull_area if hull_area > 0 else 0.0
+    
+    def _calculate_discriminative_hu(self, mask: np.ndarray) -> Dict[str, float]:
+        """
+        Calcula solo los momentos de Hu más discriminativos
+        Hu1, Hu2, Hu7 son los más útiles para formas geométricas
+        """
+        moments = cv2.moments(mask)
+        hu_moments = cv2.HuMoments(moments)
+        
+        # Solo los momentos más discriminativos
+        discriminative_indices = [0, 1, 6]  # Hu1, Hu2, Hu7
+        hu_normalized = {}
+        
+        for i in discriminative_indices:
+            hu_val = hu_moments[i][0]
+            if abs(hu_val) > 1e-5:
+                normalized = -1 * math.copysign(1, hu_val) * math.log10(abs(hu_val))
+            else:
+                normalized = 0.0
+            hu_name = ['hu1', 'hu2', 'hu7'][discriminative_indices.index(i)]
+            hu_normalized[hu_name] = normalized
+        
+        return hu_normalized
+
+
+    def _print_optimized_features(self, obj_id: int, features: Dict):
+        """Muestra solo las características clave"""
+        print(f"🔍 Objeto {obj_id}:")
+        print(f"   📊 Compactidad (Hu1): {features['hu1_compactness']:7.3f}")
+        print(f"   📏 Elongación (Hu2):  {features['hu2_elongation']:7.3f}")
+        print(f"   🔄 Simetría (Hu7):    {features['hu7_symmetry']:7.3f}")
+        print(f"   📐 Relación P/A:      {features['perimeter_area_ratio']:7.3f}")
+        print(f"   🏢 Convexidad:        {features['convexity_ratio']:7.3f}")
+        print(f"   📏 Esbeltez:          {features['aspect_ratio']:7.3f}")
+        
+        # Análisis rápido de cluster probable
+        cluster_hint = self._cluster_analysis(features)
+        print(f"   🎯 Cluster probable:  {cluster_hint}")
+        print()
+    
+    def _cluster_analysis(self, features: Dict) -> str:
+        """Análisis simple basado en las características clave"""
+        hu1 = features['hu1_compactness']
+        hu2 = features['hu2_elongation'] 
+        hu7 = features['hu7_symmetry']
+        aspect_ratio = features['aspect_ratio']
+        convexity = features['convexity_ratio']
+        perimeter_area = features['perimeter_area_ratio']
+        
+        # Lógica de clusterización (basada en patrones típicos)
+        if aspect_ratio > 3.0:
+            return "CLUSTER TORNILLOS/CLAVOS (muy alargados)"
+        elif hu1 < -4.5 and convexity < 0.8 and perimeter_area < 0.1:
+            return "CLUSTER ARANDELAS (redondas con hueco)"
+        elif hu1 < -4.0 and convexity > 0.85 and hu7 > -12:
+            return "CLUSTER TUERCAS (regulares, alta convexidad)"
+        elif aspect_ratio < 2.0 and hu2 > -8:
+            return "CLUSTER FORMAS COMPACTAS"
         else:
-            circularity = 0.0
-        
-        return circularity
+            return "CLUSTER FORMAS MIXTAS"
     
-    def _print_features(self, obj_id: int, features: Dict):
-        """Muestra las características en la consola"""
-        print(f"   Objeto {obj_id}:")
-        print(f"     📐 Área: {features['area']} píxeles")
-        print(f"     📏 Esbeltez: {features['aspect_ratio']:.2f}")
-        print(f"     🔴 Redondez: {features['circularity']:.3f}")
-
-    
-    def visualize_features(original_image: np.ndarray, 
-                      features_list: List[Dict],
-                      bounding_boxes: List[Tuple]):
-        """Visualiza los objetos con sus características"""
-        # Crear imagen para visualización
-        vis_image = original_image.copy()
-        if len(vis_image.shape) == 2:  # Si es escala de grises, convertir a color
-            vis_image = cv2.cvtColor(vis_image, cv2.COLOR_GRAY2BGR)
-        
-        for features, bbox in zip(features_list, bounding_boxes):
-            obj_id = features['object_id']
-            x, y, w, h = bbox
-            
-            # Dibujar bounding box
-            cv2.rectangle(vis_image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            
-            # Texto con características
-            text_lines = [
-                f"Obj {obj_id}",
-                f"Area: {features['area']}",
-                f"Esbeltez: {features['aspect_ratio']:.1f}",
-                f"Redondez: {features['circularity']:.2f}"
-            ]
-            
-            # Posición del texto (arriba del bounding box)
-            text_y = max(y - 10, 20)
-            for i, line in enumerate(text_lines):
-                y_pos = text_y + i * 20
-                cv2.putText(vis_image, line, (x, y_pos), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-        
-        # Redimensionar si es muy grande
-        h, w = vis_image.shape[:2]
-        if w > 800:
-            vis_image = cv2.resize(vis_image, (800, int(800 * h / w)))
-        
-        cv2.imshow('Características Extraídas', vis_image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
-    # Función de prueba completa
-    def test_feature_extractor(original_image: np.ndarray, 
-                            segmentator_result: Dict):
-        """
-        Función completa para probar el FeatureExtractor
-        """
-        print("🚀 INICIANDO EXTRACCIÓN DE CARACTERÍSTICAS")
-        print("=" * 50)
-        
-        # Extraer datos del resultado del segmentador
-        bounding_boxes = segmentator_result["bounding_boxes"]
-        masks = segmentator_result["masks"]
-        
-        print(f"📦 Objetos a analizar: {len(bounding_boxes)}")
-        
-        # Crear y usar el FeatureExtractor
-        extractor = FeatureExtractor()
-        features_list = extractor.extract_features(original_image, bounding_boxes, masks)
-        
-        # Mostrar resumen
-        print("\n📊 RESUMEN DE CARACTERÍSTICAS:")
-        print("=" * 30)
+    def get_feature_vector(self, features_list: List[Dict]) -> np.ndarray:
+        """Convierte a vector para K-Means"""
+        vectors = []
         for features in features_list:
-            obj_id = features['object_id']
-            print(f"Objeto {obj_id}: Area={features['area']}, "
-                f"Esbeltez={features['aspect_ratio']:.2f}, "
-                f"Redondez={features['circularity']:.3f}")
-        
-        # Visualizar resultados
-        #print("\n🎨 Visualizando resultados...")
-        #visualize_features(original_image, features_list, bounding_boxes)
-        
-        return features_list
+            vector = [features[name] for name in self.feature_names]
+            vectors.append(vector)
+        return np.array(vectors)
+    
+    def get_feature_names(self) -> List[str]:
+        return self.feature_names

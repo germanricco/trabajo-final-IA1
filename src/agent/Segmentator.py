@@ -6,7 +6,7 @@ from typing import List, Tuple, Dict, Optional
 class Segmentator:
     def __init__ (self,
                   min_contour_area: int = 10,
-                  min_mask_area: int = 100,
+                  min_mask_area: int = 150,
                   merge_close_boxes: bool = True,
                   overlap_threshold: float = 0.3,
                   max_distance: int = 20,
@@ -80,6 +80,11 @@ class Segmentator:
         valid_contours = filtered_results["contours"]
         bounding_boxes = filtered_results["bounding_boxes"]
         masks = filtered_results["masks"]
+
+        print(f"   Resultados filtrados:")
+        print(f"   * valid_contours: {len(valid_contours)}")
+        print(f"   * bounding_boxes: {len(bounding_boxes)}")
+        print(f"   * masks: {len(masks)}")
 
         # 8. Calcular estadisticas de la segmentacion
         statistics = self._calculate_statistics(valid_contours, bounding_boxes, masks)
