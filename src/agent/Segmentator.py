@@ -6,11 +6,11 @@ from typing import List, Tuple, Dict, Optional
 class Segmentator:
     def __init__ (self,
                   min_contour_area: int = 10,
-                  min_mask_area: int = 150,
                   merge_close_boxes: bool = True,
                   overlap_threshold: float = 0.3,
                   max_distance: int = 20,
-                  max_aspect_ratio: float = 10.0):
+                  max_aspect_ratio: float = 10.0,
+                  min_mask_area: int = 50):
         """
         Inicializa el segmentador con parámetros específicos.
 
@@ -23,11 +23,11 @@ class Segmentator:
         """
 
         self.min_contour_area = min_contour_area
-        self.min_mask_area = min_mask_area
         self.merge_close_boxes = merge_close_boxes
         self.overlap_threshold = overlap_threshold
         self.max_distance = max_distance
         self.max_aspect_ratio = max_aspect_ratio
+        self.min_mask_area = min_mask_area
 
     def process(self, binary_image: np.ndarray) -> Dict:
         """
@@ -56,7 +56,7 @@ class Segmentator:
 
         # 4. Fusionar cajas delimitadoras cercanas si esta permitido
         if self.merge_close_boxes:
-            # Nota. Se actuaizan tanto las bbox como los contornos
+            # Nota. Se actualizan tanto las bbox como los contornos validos
             bounding_boxes, valid_contours = self._merge_bounding_boxes(
                 bounding_boxes, valid_contours
             )
@@ -73,8 +73,8 @@ class Segmentator:
         masks = self._extract_masks(binary_image, valid_contours)
         print(f"   Mascaras extraidas: {len(masks)}")
 
-        # 6. Filtrar mascaras por area minima
-        filtered_results = self._filter_by_mask_area(valid_contours, bounding_boxes, masks)
+        # 6. Filtrar mascaras
+        filtered_results = self._comprehensive_filtering(valid_contours, bounding_boxes, masks)
 
         # 7. Rellenar diccionario
         valid_contours = filtered_results["contours"]
@@ -96,7 +96,9 @@ class Segmentator:
             "statistics": statistics,
             "total_objects": len(valid_contours)
         }
-        
+    
+    # === CONTORNOS ===
+
     def _find_contours(self, binary_image: np.ndarray) -> List[np.ndarray]:
         """
         Encuentra contornos en una imagen binaria usando el metodo RETR_EXTERNAL.
@@ -156,6 +158,8 @@ class Segmentator:
         
         return filtered_contours
     
+    # === BOUNDING BOXES ===
+
     def _extract_bounding_boxes(self, contours: List[np.ndarray]) -> List[Tuple]:
         """
         Extrae cajas delimitadoras rectangulares (axis-aligned) para cada contorno.
@@ -328,60 +332,6 @@ class Segmentator:
         largest_contour = max(contours, key=cv2.contourArea)
         return largest_contour
 
-    def _extract_masks(self, binary_image: np.ndarray,
-                      contours: List[np.ndarray]) -> List[np.ndarray]:
-        """
-        Extrae máscaras individuales limpias para cada contorno
-        """
-        masks = []
-        
-        for contour in contours:
-            # Crear máscara del contorno
-            contour_mask = np.zeros_like(binary_image)
-            cv2.drawContours(contour_mask, [contour], -1, 255, -1)
-            
-            # Intersecar con la imagen binaria para eliminar ruido interno
-            clean_mask = cv2.bitwise_and(contour_mask, binary_image)
-            
-            # Limpieza morfológica
-            kernel = np.ones((3, 3), np.uint8)
-            clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_OPEN, kernel)
-            clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_CLOSE, kernel)
-            
-            masks.append(clean_mask)
-        
-        return masks
-
-    def _filter_by_mask_area(self, 
-                           contours: List[np.ndarray],
-                           bounding_boxes: List[Tuple], 
-                           masks: List[np.ndarray]) -> Dict:
-        """
-        Filtra objetos basándose en el área de píxeles blancos de la máscara
-        """
-        valid_contours = []
-        valid_bboxes = []
-        valid_masks = []
-        removed_count = 0
-        
-        for i, (contour, bbox, mask) in enumerate(zip(contours, bounding_boxes, masks)):
-            mask_area = np.sum(mask > 0)
-            
-            if mask_area >= self.min_mask_area:
-                valid_contours.append(contour)
-                valid_bboxes.append(bbox)
-                valid_masks.append(mask)
-            else:
-                removed_count += 1
-                print(f"   Objeto {i} rechazado por area de mascara")
-        
-        return {
-            "contours": valid_contours,
-            "bounding_boxes": valid_bboxes,
-            "masks": valid_masks,
-            "removed_count": removed_count
-        }
-
     def _filter_by_aspect_ratio(self,
                                 contours: List[np.ndarray],
                                 bounding_boxes: List[Tuple]) -> Tuple[List[np.ndarray], List[Tuple], int]:
@@ -413,6 +363,177 @@ class Segmentator:
                 removed += 1
 
         return filtered_contours, filtered_bboxes, removed
+
+    # === MSASCARAS ===
+
+    def _extract_masks(self, binary_image: np.ndarray,
+                      contours: List[np.ndarray]) -> List[np.ndarray]:
+        """
+        Extrae máscaras individuales limpias para cada contorno
+        """
+        masks = []
+        
+        for contour in contours:
+            # Crear máscara del contorno
+            contour_mask = np.zeros_like(binary_image)
+            cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+            
+            # Intersecar con la imagen binaria para eliminar ruido interno
+            clean_mask = cv2.bitwise_and(contour_mask, binary_image)
+            
+            # Limpieza morfológica
+            kernel = np.ones((3, 3), np.uint8)
+            clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_OPEN, kernel)
+            clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_CLOSE, kernel)
+            
+            masks.append(clean_mask)
+        
+        return masks
+
+    def _comprehensive_filtering(self,
+                                 contours: List[np.ndarray],
+                                 bounding_boxes: List[Tuple],
+                                 masks: List[np.ndarray]) -> Dict:
+        """
+        Filtrado Completo en multiples etapas de mascaras
+        """
+
+        # 1. Filtro absoluto minimo (ruido extremo)
+        preliminary_filtered = self._apply_absolute_filter(contours, bounding_boxes, masks)
+        # DEBUG
+        print(f"Filtrado preliminar: {preliminary_filtered['removed_count']} mascaras eliminadas")
+        
+        # 2. Filtro relativo basado en estadisticas
+        if len(preliminary_filtered["masks"]) <= 1:
+            return preliminary_filtered
+        
+        elif len(preliminary_filtered["masks"]) == 2:
+            return self._filter_two_masks(
+                preliminary_filtered["contours"],
+                preliminary_filtered["bounding_boxes"],
+                preliminary_filtered["masks"]
+            )
+
+        else:
+            print(f"Entrando a filtrado relativo para {len(preliminary_filtered['masks'])} mascaras")
+            return self._filter_by_relative_area(
+                preliminary_filtered["contours"],
+                preliminary_filtered["bounding_boxes"],
+                preliminary_filtered["masks"]
+            )
+
+
+
+    def _apply_absolute_filter(self, contours, bounding_boxes, masks):
+        """Filtrado absoluto inicial para ruido muy evidente"""
+        valid_contours, valid_bboxes, valid_masks = [], [], []
+        removed_count = 0
+        
+        # Recorrer todos las mascaras, calculando el area y filtrando
+        for contour, bbox, mask in zip(contours, bounding_boxes, masks):
+            area = np.sum(mask > 0)
+            if area >= self.min_mask_area:
+                # Si el area es mayor los agregamos a los validos
+                valid_contours.append(contour)
+                valid_bboxes.append(bbox)
+                valid_masks.append(mask)
+            else:
+                removed_count += 1
+                print(f"   x Objeto de area {area} eliminado (filtrado absoluto)")
+
+        return {
+            "contours": valid_contours,
+            "bounding_boxes": valid_bboxes, 
+            "masks": valid_masks,
+            "removed_count": removed_count
+        }
+    
+    def _filter_two_masks(self, contours: List[np.ndarray],
+                    bounding_boxes: List[Tuple],
+                    masks: List[np.ndarray]) -> Dict:
+        """
+        Filtro especial para cuando hay exactamente 2 máscaras
+        Toma como referencia el área de la mayor
+        """
+        # Calcular áreas
+        areas = [np.sum(mask > 0) for mask in masks]
+        max_area = max(areas)
+        min_area = min(areas)
+        
+        # Calcular relación entre áreas
+        area_ratio = min_area / max_area
+        
+        print(f"   📐 Áreas: {areas[0]}px vs {areas[1]}px (relación: {area_ratio:.2f})")
+        
+        # Si la relación es muy baja, mantener solo la más grande
+        if area_ratio < 0.3:  # Ajusta este umbral según necesites
+            # Encontrar índice del objeto más grande
+            larger_idx = 0 if areas[0] > areas[1] else 1
+            
+            valid_contours = [contours[larger_idx]]
+            valid_bboxes = [bounding_boxes[larger_idx]]
+            valid_masks = [masks[larger_idx]]
+            removed_count = 1
+            
+            print(f"      🎯 Manteniendo solo objeto {larger_idx} (área mayor)")
+            print(f"      ❌ Eliminando objeto {1 - larger_idx} (relación muy baja)")
+            
+        else:
+            # Mantener ambos objetos (probablemente dos piezas válidas)
+            valid_contours = contours
+            valid_bboxes = bounding_boxes
+            valid_masks = masks
+            removed_count = 0
+            print(f"      ✅ Manteniendo ambos objetos (relación aceptable)")
+        
+        return {
+            "contours": valid_contours,
+            "bounding_boxes": valid_bboxes,
+            "masks": valid_masks,
+            "removed_count": removed_count,
+            "area_ratio": area_ratio
+        }
+
+    def _filter_by_relative_area(self, contours, bounding_boxes, masks):
+        """
+        Filtra objetos basándose en el área relativa usando estadísticas simples
+        """
+        # Calcular todas las áreas
+        mask_areas = [np.sum(mask > 0) for mask in masks]
+        
+        if not mask_areas:
+            return {"contours": [], "bounding_boxes": [], "masks": [], "removed_count": 0}
+        
+        # Calcular estadísticas de referencia
+        median_area = np.median(mask_areas)
+        mean_area = np.mean(mask_areas)
+        
+        # Usar la mediana como referencia (robusta a outliers)
+        reference_area = median_area
+        threshold_ratio = 0.10  # Conservar objetos con al menos 10% del área de referencia
+        
+        valid_contours, valid_bboxes, valid_masks = [], [], []
+        removed_count = 0
+        
+        for i, (contour, bbox, mask, area) in enumerate(zip(contours, bounding_boxes, masks, mask_areas)):
+            if area >= reference_area * threshold_ratio:
+                valid_contours.append(contour)
+                valid_bboxes.append(bbox)
+                valid_masks.append(mask)
+            else:
+                removed_count += 1
+                print(f"   Objeto {i} rechazado: área {area} < {reference_area * threshold_ratio:.1f}")
+        
+        return {
+            "contours": valid_contours,
+            "bounding_boxes": valid_bboxes,
+            "masks": valid_masks,
+            "removed_count": removed_count,
+            "reference_area": reference_area
+        }
+
+
+    # === Estadisticas ===
 
     def _calculate_statistics(self, 
                             contours: List[np.ndarray],

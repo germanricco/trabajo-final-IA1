@@ -9,15 +9,29 @@ except ImportError as e:
 
 class ImagePreprocessor:
     def __init__(self,
-                 target_size: Tuple[int, int] = (400, 400)):
+                 target_size: Tuple[int, int] = (800, 600),
+                 blur_kernel_size: Union[int, Tuple[int, int]] = (7, 7),
+                 binarization_block_size: int = 13,
+                 binarization_C: int = 2,
+                 open_kernel_size: Union[int, Tuple[int, int]] = (3, 3),
+                 close_kernel_size: Union[int, Tuple[int, int]] = (4, 4)):
         """
         Inicializa el preprocesador de imágenes.
 
         Args:
-            target_size (tuple): Tamaño objetivo (ancho, alto) para estandarización.
-            debug (bool): Si es True, se mostrarán imágenes intermedias para depuración.
+            * target_size (tuple): Tamaño objetivo (ancho, alto) para estandarización.
+            * blur_kernel_size (int|tuple): Tamaño del kernel para el filtro Gaussian Blur.
+            * binarization_block_size (int): Tamaño del vecindario para la binarización adaptativa.
+            * binarization_C (int): Constante a restar de la media/gaussiana local.
+            * open_kernel_size (int|tuple): Tamaño del kernel para la operación de apertura.
+            * close_kernel_size (int|tuple): Tamaño del kernel para la operación de cierre.
         """
         self.target_size = target_size
+        self.blur_kernel_size = blur_kernel_size
+        self.binarization_block_size = binarization_block_size
+        self.binarizacion_C = binarization_C
+        self.open_kernel_size = open_kernel_size
+        self.close_kernel_size = close_kernel_size
 
 
     def process(self, image: np.ndarray) -> np.ndarray:
@@ -28,15 +42,18 @@ class ImagePreprocessor:
         gray_image = self._standardize_size(gray_image)
 
         # Apply Gaussian blur
-        blurred_image = self._apply_gaussian_blur(gray_image, (7, 7))
+        blurred_image = self._apply_gaussian_blur(gray_image,
+                                                  kernel_size=self.blur_kernel_size)
 
         # Apply adaptive binarization
         binarized_image = self._apply_adaptive_binarization(blurred_image,
-                                                            block_size=11,
-                                                            C=2)
+                                                            block_size=self.binarization_block_size,
+                                                            C=self.binarizacion_C)
 
         # Clean binarization result
-        cleaned_image = self._clean_binarization(binarized_image, kernel_size=(3,3))
+        cleaned_image = self._clean_binarization(binarized_image,
+                                                 open_kernel_size=self.open_kernel_size,
+                                                 close_kernel_size=self.close_kernel_size)
 
         return cleaned_image
 
@@ -91,7 +108,9 @@ class ImagePreprocessor:
         return canvas
     
 
-    def _apply_gaussian_blur(self, image: np.ndarray, kernel_size: Union[int, Tuple[int, int]] = (7, 7), sigmaX: float = 0) -> np.ndarray:
+    def _apply_gaussian_blur(self, image: np.ndarray,
+                             kernel_size: Union[int, Tuple[int, int]] = (7, 7),
+                             sigmaX: float = 0) -> np.ndarray:
         """
         Aplica un filtro Gaussian Blur a la imagen.
 
@@ -173,23 +192,26 @@ class ImagePreprocessor:
         return adaptive
     
 
-    def _clean_binarization(self, binarized_image: np.ndarray, kernel_size = (3, 3)) -> np.ndarray:
+    def _clean_binarization(self, binarized_image: np.ndarray, 
+                            open_kernel_size: tuple = (2, 2),
+                            close_kernel_size: tuple = (4, 4)) -> np.ndarray:
         """
-        Cleans the binarization result using morphological opening and closing with a small 3x3 kernel.
+        Limpia la binarizacion usando apertura y cierre morfologicos
 
         Args:
-            binarized_image (np.ndarray): The binarized image to be cleaned.
+            binarized_image (np.ndarray): Imagen binarizada a limpiar.
+            open_kernel_size (tuple): Tamaño del kernel para la apertura morfologica.
+            close_kernel_size (tuple): Tamaño del kernel para el cierre morfologico.
 
         Returns:
-            np.ndarray: The cleaned binarized image.
+            np.ndarray: Imagen binarizada limpia.
         """
-        # Create a 3x3 kernel for morphological operations
-        kernel = np.ones(kernel_size, np.uint8)
+        # 1. Apertura para eliminar ruido pequeno
+        kernel_open = np.ones(open_kernel_size, np.uint8)
+        opened_image = cv2.morphologyEx(binarized_image, cv2.MORPH_OPEN, kernel_open)
 
-        # Apply morphological opening to remove small noise
-        opened_image = cv2.morphologyEx(binarized_image, cv2.MORPH_OPEN, kernel)
-
-        # Apply morphological closing to fill small gaps
-        closed_image = cv2.morphologyEx(opened_image, cv2.MORPH_CLOSE, kernel)
+        # 2. Cierre para cerrar contornos rotos
+        kernel_close = np.ones(close_kernel_size, np.uint8)
+        closed_image = cv2.morphologyEx(binarized_image, cv2.MORPH_CLOSE, kernel_close) # iba opened_image
 
         return closed_image
