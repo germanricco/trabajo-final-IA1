@@ -403,10 +403,10 @@ class Segmentator:
         # DEBUG
         print(f"Filtrado preliminar: {preliminary_filtered['removed_count']} mascaras eliminadas")
         
-        # 2. Filtro relativo basado en estadisticas
         if len(preliminary_filtered["masks"]) <= 1:
             return preliminary_filtered
         
+        # 2. Filtro relativo basado en el area del mayor contorno
         elif len(preliminary_filtered["masks"]) == 2:
             return self._filter_two_masks(
                 preliminary_filtered["contours"],
@@ -414,6 +414,7 @@ class Segmentator:
                 preliminary_filtered["masks"]
             )
 
+        # 3. Filtro relativo basado en el area media de los contornos
         else:
             print(f"Entrando a filtrado relativo para {len(preliminary_filtered['masks'])} mascaras")
             return self._filter_by_relative_area(
@@ -466,7 +467,7 @@ class Segmentator:
         print(f"   📐 Áreas: {areas[0]}px vs {areas[1]}px (relación: {area_ratio:.2f})")
         
         # Si la relación es muy baja, mantener solo la más grande
-        if area_ratio < 0.3:  # Ajusta este umbral según necesites
+        if area_ratio < 0.3:  #! Ajusta este umbral según necesites
             # Encontrar índice del objeto más grande
             larger_idx = 0 if areas[0] > areas[1] else 1
             
@@ -510,7 +511,7 @@ class Segmentator:
         
         # Usar la mediana como referencia (robusta a outliers)
         reference_area = median_area
-        threshold_ratio = 0.10  # Conservar objetos con al menos 10% del área de referencia
+        threshold_ratio = 0.10  #! Conservar objetos con al menos 10% del área de referencia
         
         valid_contours, valid_bboxes, valid_masks = [], [], []
         removed_count = 0
