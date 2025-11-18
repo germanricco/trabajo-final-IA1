@@ -364,27 +364,50 @@ class Segmentator:
 
         return filtered_contours, filtered_bboxes, removed
 
-    # === MSASCARAS ===
+# === MASCARAS ===
 
     def _extract_masks(self, binary_image: np.ndarray,
-                      contours: List[np.ndarray]) -> List[np.ndarray]:
+                    contours: List[np.ndarray]) -> List[np.ndarray]:
         """
-        Extrae máscaras individuales limpias para cada contorno
+        Extrae máscaras individuales limpias y completas para cada contorno.
+        Combina operaciones morfológicas robustas con relleno de agujeros.
         """
         masks = []
+        # Consider making the kernel size configurable
+        kernel_size = 11
+        kernel = np.ones((kernel_size, kernel_size), np.uint8)
         
         for contour in contours:
-            # Crear máscara del contorno
+            # 1. Crear una mascara del contorno
             contour_mask = np.zeros_like(binary_image)
-            cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+            cv2.drawContours(contour_mask, [contour], -1, 255, -1)  # Draw filled contour
+
+            # 2. Perform a strong MORPH_CLOSE to fill holes and smooth the shape
+            # This is crucial for filling internal gaps[citation:4]
+            closed_mask = cv2.morphologyEx(contour_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+            # 3. Optional but recommended: Explicit hole filling using floodFill
+            filled_mask = closed_mask.copy()
+            h, w = filled_mask.shape
             
-            # Intersecar con la imagen binaria para eliminar ruido interno
-            clean_mask = cv2.bitwise_and(contour_mask, binary_image)
+            # Create a mask for floodFill (needs to be 2 pixels wider and taller)
+            floodfill_mask = np.zeros((h+2, w+2), np.uint8)
             
-            # Limpieza morfológica
-            kernel = np.ones((3, 3), np.uint8)
-            clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_OPEN, kernel)
-            clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_CLOSE, kernel)
+            # Seed point: use the centroid of the contour, likely inside the object
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                # Ensure the seed point is within the image bounds
+                if 0 <= cX < w and 0 <= cY < h:
+                    cv2.floodFill(filled_mask, floodfill_mask, (cX, cY), 255)
+            
+            # 4. Final intersection with the original binary image to respect overall boundaries
+            # This step is now less destructive as the primary filling is done.
+            clean_mask = cv2.bitwise_and(filled_mask, binary_image)
+            
+            # 5. A final light morphological close to clean up the edges
+            clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_CLOSE, np.ones((3,3), np.uint8))
             
             masks.append(clean_mask)
         
