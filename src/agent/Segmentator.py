@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from typing import List, Tuple, Dict, Optional
-
+import logging
 
 class Segmentator:
     def __init__ (self,
@@ -29,6 +29,9 @@ class Segmentator:
         self.max_aspect_ratio = max_aspect_ratio
         self.min_mask_area = min_mask_area
 
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("✅ Segmentator inicializado correctamente")
+
     def process(self, binary_image: np.ndarray) -> Dict:
         """
         Procesa una imagen binaria para encontrar y segmentar contornos.
@@ -40,51 +43,46 @@ class Segmentator:
             Dict: Diccionario con las cajas delimitadoras de los contornos encontrados.
         """
 
-        print(f"🚀 INICIANDO PROCESO DE SEGMENTACIÓN")
+        # print(f"🚀 INICIANDO PROCESO DE SEGMENTACIÓN")
 
-        # 1. Encuentrar contornos en la imagen binaria
+        # Encuentrar contornos en la imagen binaria
         contours = self._find_contours(binary_image)
-        print(f"   Contornos encontrados: {len(contours)}")
+        logging.debug(f"   Contornos encontrados: {len(contours)}")
 
-        # 2. Filtrar y validar los contornos encontrados
+        # Filtrar y validar los contornos encontrados
         valid_contours = self._filter_contours(contours)
-        print(f"   Contornos validos: {len(valid_contours)}")
+        logging.debug(f"   Contornos válidos después del filtrado: {len(valid_contours)}")
 
-        # 3. Obtener cajas delimitadoras de los contornos válidos
+        # Obtener cajas delimitadoras de los contornos válidos
         bounding_boxes = self._extract_bounding_boxes(valid_contours)
-        print(f"   Bounding boxes: {len(bounding_boxes)}")
+        logging.debug(f"   Bounding boxes: {len(bounding_boxes)}")
 
-        # 4. Fusionar cajas delimitadoras cercanas si esta permitido
+        # Fusionar cajas delimitadoras cercanas si esta permitido
         if self.merge_close_boxes:
-            # Nota. Se actualizan tanto las bbox como los contornos validos
             bounding_boxes, valid_contours = self._merge_bounding_boxes(
                 bounding_boxes, valid_contours
             )
-            print(f"   Bounding boxes despues de fusion: {len(bounding_boxes)}")
+        logging.debug(f"   Bounding boxes despues de fusion: {len(bounding_boxes)}")
         
-        # 4.b Filtrar por relacion de aspecto demasiado grande
+        # Filtrar por relacion de aspecto demasiado grande
         valid_contours, bounding_boxes, aspect_removed = self._filter_by_aspect_ratio(valid_contours,
                                                                       bounding_boxes)
         
         if aspect_removed:
-            print(f"   Eliminados por aspecto excesivo: {aspect_removed}")
+           logging.debug(f"   Contornos eliminados por aspecto: {aspect_removed}")
 
-        # 5. Extraer mascaras individuales para cada contorno
+        # Extraer mascaras individuales para cada contorno
         masks = self._extract_masks(binary_image, valid_contours)
-        print(f"   Mascaras extraidas: {len(masks)}")
+        logging.debug(f"   Mascaras extraidas: {len(masks)}")
 
-        # 6. Filtrar mascaras
+        # Filtrar mascaras
         filtered_results = self._comprehensive_filtering(valid_contours, bounding_boxes, masks)
+        logging.debug(f"   Mascaras despues del filtrado completo: {len(filtered_results['masks'])}")
 
-        # 7. Rellenar diccionario
+        # Rellenar diccionario
         valid_contours = filtered_results["contours"]
         bounding_boxes = filtered_results["bounding_boxes"]
         masks = filtered_results["masks"]
-
-        print(f"   Resultados filtrados:")
-        print(f"   * valid_contours: {len(valid_contours)}")
-        print(f"   * bounding_boxes: {len(bounding_boxes)}")
-        print(f"   * masks: {len(masks)}")
 
         # 8. Calcular estadisticas de la segmentacion
         statistics = self._calculate_statistics(valid_contours, bounding_boxes, masks)
@@ -97,7 +95,6 @@ class Segmentator:
             "total_objects": len(valid_contours)
         }
     
-    # === CONTORNOS ===
 
     def _find_contours(self, binary_image: np.ndarray) -> List[np.ndarray]:
         """
@@ -421,25 +418,27 @@ class Segmentator:
         Filtrado Completo en multiples etapas de mascaras
         """
 
-        # 1. Filtro absoluto minimo (ruido extremo)
+        # Filtro absoluto minimo (ruido extremo)
         preliminary_filtered = self._apply_absolute_filter(contours, bounding_boxes, masks)
-        # DEBUG
-        print(f"Filtrado preliminar: {preliminary_filtered['removed_count']} mascaras eliminadas")
+        self.logger.debug("Filtrado preliminar: {preliminary_filtered['removed_count']} mascaras eliminadas")
         
         if len(preliminary_filtered["masks"]) <= 1:
             return preliminary_filtered
         
-        # 2. Filtro relativo basado en el area del mayor contorno
+        # Filtro relativo basado en el area del mayor contorno
         elif len(preliminary_filtered["masks"]) == 2:
+            self.logger.debug("Aplicando filtro especial para 2 mascaras")
+
             return self._filter_two_masks(
                 preliminary_filtered["contours"],
                 preliminary_filtered["bounding_boxes"],
                 preliminary_filtered["masks"]
             )
-
-        # 3. Filtro relativo basado en el area media de los contornos
+            
+        # Filtro relativo basado en el area media de los contornos
         else:
-            print(f"Entrando a filtrado relativo para {len(preliminary_filtered['masks'])} mascaras")
+            self.logger.debug("Aplicando filtro por area relativa")
+
             return self._filter_by_relative_area(
                 preliminary_filtered["contours"],
                 preliminary_filtered["bounding_boxes"],
@@ -463,7 +462,7 @@ class Segmentator:
                 valid_masks.append(mask)
             else:
                 removed_count += 1
-                print(f"   x Objeto de area {area} eliminado (filtrado absoluto)")
+                self.logger.debug(f"Objeto de area {area} eliminado (filtrado absoluto)")
 
         return {
             "contours": valid_contours,
@@ -487,8 +486,6 @@ class Segmentator:
         # Calcular relación entre áreas
         area_ratio = min_area / max_area
         
-        print(f"   📐 Áreas: {areas[0]}px vs {areas[1]}px (relación: {area_ratio:.2f})")
-        
         # Si la relación es muy baja, mantener solo la más grande
         if area_ratio < 0.3:  #! Ajusta este umbral según necesites
             # Encontrar índice del objeto más grande
@@ -498,9 +495,7 @@ class Segmentator:
             valid_bboxes = [bounding_boxes[larger_idx]]
             valid_masks = [masks[larger_idx]]
             removed_count = 1
-            
-            print(f"      🎯 Manteniendo solo objeto {larger_idx} (área mayor)")
-            print(f"      ❌ Eliminando objeto {1 - larger_idx} (relación muy baja)")
+            self.logger.debug(f"Objeto {1 - larger_idx} eliminado por baja relación de área ({area_ratio:.2f})")
             
         else:
             # Mantener ambos objetos (probablemente dos piezas válidas)
@@ -508,7 +503,7 @@ class Segmentator:
             valid_bboxes = bounding_boxes
             valid_masks = masks
             removed_count = 0
-            print(f"      ✅ Manteniendo ambos objetos (relación aceptable)")
+            self.logger.debug(f"Objeto {0} y {1} mantenidos (relación de área aceptable: {area_ratio:.2f})")
         
         return {
             "contours": valid_contours,

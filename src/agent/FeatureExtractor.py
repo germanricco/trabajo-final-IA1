@@ -2,14 +2,16 @@ import cv2
 import numpy as np
 from typing import List, Dict, Tuple
 import math
+from src.agent.ContourManager import ContourManager
+import logging
 
 class FeatureExtractor:
     def __init__(self):
         """
         Inicializa el extractor de caracteristicas con parametros configurables
         """
-        self._epsilon_factor = 0.02  # Para aproximación poligonal
-        self._min_contour_length = 50  # Longitud mínima de contorno válido
+        self._epsilon_factor = 0.02     # Para aproximación poligonal
+        self._min_contour_length = 50   # Longitud mínima de contorno válido
 
         self.feature_names = [
             'circularity',
@@ -20,7 +22,8 @@ class FeatureExtractor:
             'hu_moment_2'
         ]
 
-        print("✅ FeatureExtractor inicializado correctamente")
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("✅ FeatureExtractor inicializado correctamente")
 
     def extract_features(self,
                          bounding_boxes: List[Tuple],
@@ -38,22 +41,21 @@ class FeatureExtractor:
         """
 
         features_list = []
-
-        print(f"🚀 Iniciando extracción de características para {len(bounding_boxes)} objetos")
+        self.logger.debug("Iniciando extracción de características para {len(bounding_boxes)} objetos")
 
         for i, (bbox, mask) in enumerate(zip(bounding_boxes, masks)):
-            print(f"   🔍 Procesando objeto {i+1}/{len(bounding_boxes)}...")
+            self.logger.debug("Procesando objeto {i+1}/{len(bounding_boxes)}...")
             
             try:
                 features = self._extract_single_object_features(bbox, mask, i+1)
                 features_list.append(features)
-                print(f"   ✅ Objeto {i+1}: {len(features)} características extraídas")
+                self.logger.debug("Objeto {i+1}: {len(features)} características extraídas")
 
             except Exception as e:
-                print(f"   ❌ Error procesando objeto {i+1}: {e}")
+                self.logger.error("Error extrayendo caracteristicas de objeto {i+1}: {e}")
                 features_list.append(self._create_default_features(i+1, bbox))
         
-        print(f"Extraccion completada: {len(features_list)} objetos procesados")
+        self.logger.debug("Extraccion completada: {len(features_list)} objetos procesados")
         return features_list
 
     def _extract_single_object_features(self,
@@ -74,40 +76,31 @@ class FeatureExtractor:
 
         # Validar entrada
         if mask is None or mask.size == 0:
-            print(f"   ⚠️ Objeto {obj_id}: Máscara vacía, usando características por defecto")
+            self.logger.warning("Objeto {obj_id}: Máscara vacía, usando características por defecto")
             return self._create_default_features(obj_id, bbox)
         
-        # Obtener contorno principal
-        contour = self._get_contour_from_mask(mask)
-        if contour is None:
-            print(f"   ⚠️ Objeto {obj_id}: No se pudo extraer contorno, usando características por defecto")
-            return self._create_default_features(obj_id, bbox)
+        # Inicializar el gestor de contornos
+        contour_manager = ContourManager(mask)
         
-        # Validar contorno
-        if len(contour) < 3:
-            print(f"   ⚠️ Objeto {obj_id}: Contorno muy pequeño, usando características por defecto")
-            return self._create_default_features(obj_id, bbox)
-        
-        # 1. Calcular propiedades basicas
-        basic_props = self._calculate_basic_properties(contour, mask)
+        # Calcular propiedades basicas
+        basic_props = self._calculate_basic_properties(contour_manager, mask)
+        self.logger.debug("Caracteristicas basicas calculadas")
 
-        # Validar propiedades basicas
-        if basic_props["area"] == 0:
-            print(f"   ⚠️ Objeto {obj_id}: Área insuficiente, usando características por defecto")
-            return self._create_default_features(obj_id, bbox)
-        
-        # 2. Calcular propiedades avanzadas
-        advanced_props = self._calculate_advanced_properties(contour, basic_props, bbox)
+        # Calcular propiedades avanzadas
+        advanced_props = self._calculate_advanced_properties(contour_manager, basic_props)
+        self.logger.debug("Caracteristicas avanzadas calculadas")
 
+        # Ordenar y retornar
         features = {
             "object_id": obj_id,
-            "bounding_box": bbox,
+            **basic_props,
             **advanced_props
         }
-        
         return features
 
-    def _calculate_basic_properties(self, contour: np.ndarray, mask: np.ndarray) -> Dict:
+    def _calculate_basic_properties(self,
+                                    contour_manager: ContourManager,
+                                    mask: np.ndarray) -> Dict:
         """
         Calcula propiedades basicas del contorno y mascara
 
@@ -118,17 +111,20 @@ class FeatureExtractor:
         Returns:
             Dict: Diccionario con las propiedades basicas calculadas
         """
+        # Area externa
+        external_area = cv2.contourArea(contour_manager.external_contour)
 
-        # Calcular propiedades geometricas fundamentales
-        area = float(np.sum(mask > 0))
-        perimeter = float(cv2.arcLength(contour, True))
+        # Area neta
+        actual_area = contour_manager.get_actual_area()
+
+        # Perímetro del contorno externo
+        external_perimeter = cv2.arcLength(contour_manager.external_contour, True)
         
-        # Calcular Convex hull
-        hull = cv2.convexHull(contour)
-        hull_area = float(cv2.contourArea(hull))
+        # Area del casco convexo
+        hull_area = float(cv2.contourArea(contour_manager.convex_hull))
         
         # Calcular momentos de Hu
-        moments = cv2.moments(contour)
+        moments = cv2.moments(contour_manager.external_contour)
         hu_moments = cv2.HuMoments(moments)
 
         # Normalizar
@@ -136,18 +132,17 @@ class FeatureExtractor:
         hu2 = self._normalize_hu_moment(hu_moments[1][0])
         
         return {
-            'area': area,
-            'perimeter': perimeter,
+            'external_area': external_area,     # Para circularidad
+            'area': actual_area,                # Area neta para solidez
+            'perimeter': external_perimeter,    # Para circularidad y compacidad
             'hull_area': hull_area,
             'hu1': float(hu1),
             'hu2': float(hu2),
-            'hull': hull
         }    
 
 
-    def _calculate_advanced_properties(self, contour: np.ndarray,
-                                    basic_props: Dict,
-                                    bbox: Tuple) -> Dict:
+    def _calculate_advanced_properties(self, contour_manager: ContourManager,
+                                    basic_props: Dict) -> Dict:
         """
         Calcula propiedades avanzadas usando propiedades básicas precomputadas.
 
@@ -161,68 +156,38 @@ class FeatureExtractor:
         """
 
         # Tomo todos las propiedades basicas
+        external_area = basic_props['external_area']
         area = basic_props['area']
         perimeter = basic_props['perimeter']
         hull_area = basic_props['hull_area']
-        hu1 = basic_props['hu1']
-        hu2 = basic_props['hu2']
 
-        # 1. Circularidad - Medida de que tan circular es la forma
-        circularity = self._compute_circularity(area, perimeter)
+        # Solidez
+        solidity = area / hull_area if hull_area > 0 else 0
 
-        # 2. Aspect Ratio - Relacion de aspecto usando rectangulo rotado minimo
-        aspect_ratio = self._compute_oriented_aspect_ratio(contour)
-            
-        # 3. Solidez - Relacion entre el area y area del convex hull
-        solidity = self._compute_solidity(area, hull_area)
+        # Circularidad - Medida de que tan circular es la forma
+        circularity = (4 * np.pi * external_area) / (perimeter ** 2) if perimeter > 0 else 0
+
+        # Compacidad considerando agujeros
+        compactness = (perimeter ** 2) / external_area if external_area > 0 else 0
+
+        # Aspect Ratio - Relacion de aspecto usando rectangulo rotado minimo
+        min_rect = contour_manager.min_area_rectangle
+        width, height = min_rect[1]
+        aspect_ratio = max(width, height) / min(width, height) if min(width, height) > 0 else 0
         
-        # 4. Relacion perimetro-area - Modela la complejidad del contorno
-        perimeter_area_ratio = self._compute_perimeter_area_ratio(perimeter, area)  # Evitar división por cero
-        
-        # 5. HU MOMENTS (ya calculados y normalizados) - Invariantes de forma
-        
+        # Clasificacion de Agujeros (reemplaza logica booleana de 'has_hole')
+        hole_classification = self._classify_hole(contour_manager, basic_props)
+
+        # Compactness: Factor de Forma. 
         return {
+            'solidity': solidity,
             'circularity': circularity,
             'aspect_ratio': aspect_ratio,
-            'solidity': solidity,
-            'perimeter_area_ratio': perimeter_area_ratio,
-            'hu_moment_1': hu1,
-            'hu_moment_2': hu2
+            "compactness": compactness,     
+
+            "has_structural_hole": hole_classification["has_structural_hole"],
+            "hole_confidence": hole_classification["hole_confidence"]
         }
-    
-    def _compute_circularity(self, area: float, perimeter: float) -> float:
-        """Calcula la circularidad: 4π * área / perímetro²"""
-        if perimeter > 0:
-            return (4 * np.pi * area) / (perimeter ** 2)
-        return 0.0
-    
-    def _compute_oriented_aspect_ratio(self, contour: np.ndarray) -> float:
-        """Calcula el aspect ratio usando el rectángulo rotado mínimo"""
-        if len(contour) < 5:  # Se necesitan al menos 5 puntos para un rectángulo rotado
-            return 0.0
-            
-        try:
-            rect = cv2.minAreaRect(contour)
-            width, height = rect[1]
-            
-            if min(width, height) > 0:
-                return max(width, height) / min(width, height)
-        except Exception as e:
-            print(f"   ⚠️ Error calculando aspect ratio: {e}")
-            
-        return 0.0
-    
-    def _compute_solidity(self, area: float, hull_area: float) -> float:
-        """Calcula la solidez: área / área_del_convex_hull"""
-        if hull_area > 0:
-            return area / hull_area
-        return 0.0
-    
-    def _compute_perimeter_area_ratio(self, perimeter: float, area: float) -> float:
-        """Calcula la relación perímetro-área"""
-        if area > 0:
-            return perimeter / area
-        return 0.0
     
     def _normalize_hu_moment(self, hu_value: float) -> float:
         """
@@ -238,29 +203,6 @@ class FeatureExtractor:
         normalized = -np.sign(hu_value) * np.log10(np.abs(hu_value) + 1e-10)
         return float(normalized)
 
-
-    def _get_contour_from_mask(self, mask: np.ndarray) -> np.ndarray:
-        """
-        Extrae el contorno principal de una máscara binaria.
-        """
-        try:
-            # Encontrar contornos
-            contours, _ = cv2.findContours(
-                mask.astype(np.uint8), 
-                cv2.RETR_EXTERNAL, 
-                cv2.CHAIN_APPROX_SIMPLE
-            )
-            
-            if not contours:
-                return None
-            
-            # Devolver el contorno más grande por área
-            return max(contours, key=cv2.contourArea)
-            
-        except Exception as e:
-            print(f"   ⚠️ Error extrayendo contorno: {e}")
-            return None
-    
     
     def _create_default_features(self, obj_id: int, bbox: Tuple) -> Dict:
         """
@@ -277,21 +219,72 @@ class FeatureExtractor:
             'hu_moment_2': 0.0
         }
     
-    def get_feature_vector(self, features_dict: Dict) -> np.ndarray:
-        """
-        Convierte un diccionario de características a vector numérico.
 
-        Args:
-            features_dict: Diccionario de características
-
-        Returns:
-            Vector numérico con las características
+    def _classify_hole(self, contour_manager: ContourManager, basic_props: Dict) -> Dict:
         """
-        return np.array([
-            features_dict['circularity'],
-            features_dict['aspect_ratio'],
-            features_dict['solidity'],
-            features_dict['perimeter_area_ratio'],
-            features_dict['hu_moment_1'],
-            features_dict['hu_moment_2']
-        ])
+        Evalúa si el objeto tiene un agujero estructural real utilizando un sistema de puntuación.
+        Devuelve un diccionario con 'has_structural_hole' (booleano) y 'hole_confidence' (float).
+        """
+
+        # Si no hay contornos internos, definitivamente no hay agujero.
+        if not contour_manager.has_hole():
+            return {"has_structural_hole": False, "hole_confidence": 0.0}
+
+        # 1. Relación de Área del Agujero (Hole Area Ratio)
+        external_area = cv2.contourArea(contour_manager.external_contour)
+        hole_area = cv2.contourArea(contour_manager.internal_contour)
+        hole_area_ratio = hole_area / external_area if external_area > 0 else 0
+
+        # 2. Circularidad del Agujero
+        hole_perimeter = cv2.arcLength(contour_manager.internal_contour, True)
+        hole_circularity = (4 * np.pi * hole_area) / (hole_perimeter ** 2) if hole_perimeter > 0 else 0
+
+        # 3. Centrado del Agujero
+        # - Encuentra el centro del contorno externo y del interno
+        M_ext = cv2.moments(contour_manager.external_contour)
+        M_int = cv2.moments(contour_manager.internal_contour)
+        
+        if M_ext["m00"] != 0 and M_int["m00"] != 0:
+            cX_ext = int(M_ext["m10"] / M_ext["m00"])
+            cY_ext = int(M_ext["m01"] / M_ext["m00"])
+            cX_int = int(M_int["m10"] / M_int["m00"])
+            cY_int = int(M_int["m01"] / M_int["m00"])
+            
+            # Calcular la distancia entre centros
+            centroid_distance = np.sqrt((cX_ext - cX_int)**2 + (cY_ext - cY_int)**2)
+            # Normalizar la distancia por el diámetro aproximado del objeto externo
+            equivalent_diameter = np.sqrt(4 * external_area / np.pi)
+            normalized_centroid_distance = centroid_distance / equivalent_diameter
+        else:
+            normalized_centroid_distance = 1.0  # Valor por defecto (descentrado)
+
+        # Sistema de Puntuación
+        score = 0.0
+
+        # A. Puntuación por Tamaño del Agujero
+        if hole_area_ratio > 0.15:  # Agujeros muy grandes puntúan alto
+            score += 2.0
+        elif hole_area_ratio > 0.05:  # Agujeros de tamaño medio
+            score += 1.0
+
+        # B. Puntuación por Circularidad
+        if hole_circularity > 0.75:  # Agujeros muy circulares
+            score += 2.0
+        elif hole_circularity > 0.5:
+            score += 1.0
+
+        # C. Puntuación por Centrado
+        if normalized_centroid_distance < 0.1:  # Muy bien centrado
+            score += 2.0
+        elif normalized_centroid_distance < 0.2:  # Aceptablemente centrado
+            score += 1.0
+
+        # Umbral de decisión (ajustable mediante validación)
+        HOLE_CONFIDENCE_THRESHOLD = 2.8
+        has_structural_hole = score >= HOLE_CONFIDENCE_THRESHOLD
+        hole_confidence = min(score / HOLE_CONFIDENCE_THRESHOLD, 1.0)  # Normalizado a 0-1
+
+        return {
+            "has_structural_hole": has_structural_hole,
+            "hole_confidence": hole_confidence
+        }

@@ -4,6 +4,7 @@ try:
     import numpy as np
     import matplotlib.pyplot as plt
     from typing import List, Tuple, Union, Optional
+    import logging
 except ImportError as e:
     raise ImportError(f"Faltan dependencias necesarias: {e}")
 
@@ -33,28 +34,36 @@ class ImagePreprocessor:
         self.open_kernel_size = open_kernel_size
         self.close_kernel_size = close_kernel_size
 
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("✅ ImagePreprocessor inicializado correctamente")
+
 
     def process(self, image: np.ndarray) -> np.ndarray:
         # Convert to grayscale
         gray_image = self._convert_to_grayscale(image)
-        
+        self.logger.debug("Imagen convertida a escala de grises.")
+
         # Standardize size
         gray_image = self._standardize_size(gray_image)
+        self.logger.debug("Imagen redimensionada a tamaño estándar.")
 
         # Apply Gaussian blur
         blurred_image = self._apply_gaussian_blur(gray_image,
                                                   kernel_size=self.blur_kernel_size)
+        self.logger.debug("Filtro Gaussian Blur aplicado.")
 
         # Apply adaptive binarization
         binarized_image = self._apply_adaptive_binarization(blurred_image,
                                                             block_size=self.binarization_block_size,
                                                             C=self.binarizacion_C)
+        self.logger.debug("Binarización adaptativa aplicada.")
 
         # Clean binarization result
         cleaned_image = self._clean_binarization(binarized_image,
                                                  open_kernel_size=self.open_kernel_size,
                                                  close_kernel_size=self.close_kernel_size)
-
+        self.logger.debug("Binarización limpiada con operaciones morfológicas.")
+        
         return cleaned_image
 
 
