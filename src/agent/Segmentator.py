@@ -541,7 +541,7 @@ class Segmentator:
                 valid_masks.append(mask)
             else:
                 removed_count += 1
-                print(f"   Objeto {i} rechazado: área {area} < {reference_area * threshold_ratio:.1f}")
+                self.logger.debug(f"Objeto {i} rechazado: área {area} < {reference_area * threshold_ratio:.1f}")
         
         return {
             "contours": valid_contours,
