@@ -124,12 +124,12 @@ class ImagePreprocessor:
         Aplica un filtro Gaussian Blur a la imagen.
 
         Args:
-            image (np.ndarray): Imagen de entrada (BGR o escala de grises).
-            kernel_size (int|tuple): Tamaño del kernel (k, k) o un entero k. Debe ser impar y > 0.
-            sigmaX (float): Desviación estándar en X; 0 calcula automáticamente según kernel.
+            * image (np.ndarray): Imagen de entrada (BGR o escala de grises).
+            * kernel_size (int|tuple): Tamaño del kernel (k, k) o un entero k. Debe ser impar y > 0.
+            * sigmaX (float): Desviación estándar en X; 0 calcula automáticamente según kernel.
 
         Returns:
-            np.ndarray: Imagen filtrada con Gaussian Blur.
+            * np.ndarray: Imagen filtrada con Gaussian Blur.
 
         Raises:
             ValueError: Si la imagen es inválida o kernel_size no es adecuado.
