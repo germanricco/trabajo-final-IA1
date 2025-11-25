@@ -18,7 +18,6 @@ class GeometricProperties:
     circularity: float
     compactness: float
     solidity: float
-    moments: Dict[str, float]
     hu_moments: np.ndarray
     has_structural_hole: bool
     hole_confidence: float
@@ -88,7 +87,6 @@ class ContourManager:
                 circularity=circularity,
                 compactness=compactness,
                 solidity=solidity,
-                moments=self._extract_key_moments(moments),
                 hu_moments=hu_moments,
                 has_structural_hole=has_structural_hole,
                 hole_confidence=hole_confidence,
