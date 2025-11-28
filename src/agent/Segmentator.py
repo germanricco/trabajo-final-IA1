@@ -10,7 +10,8 @@ class Segmentator:
                   overlap_threshold: float = 0.3,
                   max_distance: int = 20,
                   max_aspect_ratio: float = 10.0,
-                  min_mask_area: int = 50):
+                  min_mask_area: int = 50,
+                  mask_kernel_size: int = 11):
         """
         Inicializa el segmentador con parámetros específicos.
 
@@ -28,6 +29,7 @@ class Segmentator:
         self.max_distance = max_distance
         self.max_aspect_ratio = max_aspect_ratio
         self.min_mask_area = min_mask_area
+        self.mask_kernel_size = mask_kernel_size
 
         self.logger = logging.getLogger(__name__)
         self.logger.info("✅ Segmentator inicializado correctamente")
@@ -46,7 +48,7 @@ class Segmentator:
         # print(f"🚀 INICIANDO PROCESO DE SEGMENTACIÓN")
 
         # Encuentrar contornos en la imagen binaria
-        contours = self._find_contours(binary_image)
+        contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         logging.debug(f"   Contornos encontrados: {len(contours)}")
 
         # Filtrar y validar los contornos encontrados
@@ -72,7 +74,7 @@ class Segmentator:
            logging.debug(f"   Contornos eliminados por aspecto: {aspect_removed}")
 
         # Extraer mascaras individuales para cada contorno
-        masks = self._extract_masks(binary_image, valid_contours)
+        masks = self._extract_masks(binary_image, valid_contours, bounding_boxes, self.mask_kernel_size)
         logging.debug(f"   Mascaras extraidas: {len(masks)}")
 
         # Filtrar mascaras
@@ -364,50 +366,85 @@ class Segmentator:
 # === MASCARAS ===
 
     def _extract_masks(self, binary_image: np.ndarray,
-                    contours: List[np.ndarray]) -> List[np.ndarray]:
+                    contours: List[np.ndarray],
+                    bounding_boxes: List[Tuple],
+                    mask_kernel_size: int) -> List[np.ndarray]:
         """
         Extrae máscaras individuales limpias y completas para cada contorno.
         Combina operaciones morfológicas robustas con relleno de agujeros.
         """
         masks = []
-        # Consider making the kernel size configurable
-        kernel_size = 11
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
-        
-        for contour in contours:
-            # 1. Crear una mascara del contorno
-            contour_mask = np.zeros_like(binary_image)
-            cv2.drawContours(contour_mask, [contour], -1, 255, -1)  # Draw filled contour
+        h_img, w_img = binary_image.shape[:2]
 
-            # 2. Perform a strong MORPH_CLOSE to fill holes and smooth the shape
-            # This is crucial for filling internal gaps[citation:4]
-            closed_mask = cv2.morphologyEx(contour_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        # Kernel para limpiar ruido interno y cerrar bordes
 
-            # 3. Optional but recommended: Explicit hole filling using floodFill
-            filled_mask = closed_mask.copy()
-            h, w = filled_mask.shape
-            
-            # Create a mask for floodFill (needs to be 2 pixels wider and taller)
-            floodfill_mask = np.zeros((h+2, w+2), np.uint8)
-            
-            # Seed point: use the centroid of the contour, likely inside the object
-            M = cv2.moments(contour)
-            if M["m00"] != 0:
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-                # Ensure the seed point is within the image bounds
-                if 0 <= cX < w and 0 <= cY < h:
-                    cv2.floodFill(filled_mask, floodfill_mask, (cX, cY), 255)
-            
-            # 4. Final intersection with the original binary image to respect overall boundaries
-            # This step is now less destructive as the primary filling is done.
-            clean_mask = cv2.bitwise_and(filled_mask, binary_image)
-            
-            # 5. A final light morphological close to clean up the edges
-            clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_CLOSE, np.ones((3,3), np.uint8))
-            
-            masks.append(clean_mask)
+        k_size = max(3, mask_kernel_size) 
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
         
+        if len(contours) != len(bounding_boxes):
+            self.logger.warning("Desajuste entre contornos y bboxes. Se omitirán máscaras.")
+            return []
+        
+        for contour, bbox in zip(contours, bounding_boxes):
+            # Crear una mascara del contorno
+            x, y, w, h = bbox
+
+            # Agregamos un pequeño padding (seguridad para bordes)
+            pad = 10
+            x1 = max(0, x - pad)
+            y1 = max(0, y - pad)
+            x2 = min(w_img, x + w + pad)
+            y2 = min(h_img, y + h + pad)
+            
+            # ROI (Region of Interest)
+            roi_w, roi_h = x2 - x1, y2 - y1
+            
+            # Si el ROI es inválido (0 pixels), saltamos
+            if roi_w <= 0 or roi_h <= 0:
+                continue
+
+            # 1. Recorte de la imagen binaria original (contiene los fragmentos)
+            binary_roi = binary_image[y1:y2, x1:x2].copy()
+
+            # 2. Offset del contorno: Movemos el contorno a las coordenadas (0,0) del ROI
+            # Restamos la esquina superior izquierda (x1, y1) a todos los puntos
+            contour_offset = contour - np.array([x1, y1])
+            base_mask_roi = np.zeros((roi_h, roi_w), dtype=np.uint8)
+            cv2.drawContours(base_mask_roi, [contour_offset], -1, 255, -1) # Relleno sólido
+            
+            # 3. Intersección con la imagen original (Recuperar agujeros reales)
+            object_roi = cv2.bitwise_and(base_mask_roi, binary_roi)
+            
+            # --- LA SOLUCIÓN MAGISTRAL: CLOSING ADAPTATIVO ---
+            # El tamaño del kernel depende del tamaño del objeto.
+            # Una tuerca grande tiene una grieta grande; una arandela pequeña, una grieta chica.
+            # Usamos el 10% del tamaño menor del objeto como referencia de "grieta a cerrar".
+            
+            object_min_dim = min(w, h)
+            dynamic_k_size = int(object_min_dim * 0.20) # 20% del tamaño
+            
+            # Aseguramos que sea impar y al menos 3
+            if dynamic_k_size % 2 == 0: dynamic_k_size += 1
+            dynamic_k_size = max(3, dynamic_k_size)
+            
+            # Creamos kernel dinámico
+            weld_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dynamic_k_size, dynamic_k_size))
+            
+            # Aplicamos CLOSING fuerte para unir anillos internos y externos
+            # Esto cierra la brecha negra del bisel, pero es (esperemos) 
+            # menor que el agujero central, así que el agujero sobrevive.
+            object_roi = cv2.morphologyEx(object_roi, cv2.MORPH_CLOSE, weld_kernel, iterations=1)
+            
+            # -------------------------------------------------
+
+            # 4. Limpieza final suave (para bordes)
+            object_roi = cv2.morphologyEx(object_roi, cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
+
+            # 5. Reconstrucción
+            full_mask = np.zeros((h_img, w_img), dtype=np.uint8)
+            full_mask[y1:y2, x1:x2] = object_roi
+            
+            masks.append(full_mask)
         return masks
 
     def _comprehensive_filtering(self,

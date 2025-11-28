@@ -28,18 +28,20 @@ class ImageClassifier:
         self.img_prep = ImagePreprocessor(
             target_size = (800,600),
             blur_kernel_size = (7, 7),
-            binarization_block_size = 11,
-            binarization_C = 3,
+            binarization_block_size = 29,
+            binarization_C = -13,
             open_kernel_size = (5, 5),
-            close_kernel_size = (9, 9)
+            close_kernel_size = (7, 7)
         )
-
+        
         self.segmentator = Segmentator(
             min_contour_area=100,
-            min_mask_area=200,
             merge_close_boxes=True,
             overlap_threshold=0.2,
-            max_distance=5
+            max_distance=5,
+            max_aspect_ratio=15.0,
+            min_mask_area=100,
+            mask_kernel_size=11
         )
 
         self.feature_extractor = FeatureExtractor()

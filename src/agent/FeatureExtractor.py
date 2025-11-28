@@ -22,6 +22,8 @@ class FeatureExtractor:
             'circularity', 
             'aspect_ratio', 
             'hole_confidence',
+            'circle_ratio',
+            'num_vertices',
             'hu1', 'hu2', 'hu3' # Momentos invariantes
         ]
 
@@ -76,6 +78,8 @@ class FeatureExtractor:
             
             # Características Estructurales
             'hole_confidence': float(p.hole_confidence), # Clave para tuercas/arandelas
+            'circle_ratio': float(p.circle_ratio),     # Clave para distinguir círculos
+            'num_vertices': float(p.num_vertices), # Clave para distinguir formas
             
             # Momentos de Hu (Invariantes a rotación)
             'hu1': float(hu[0]), # Dispersión
