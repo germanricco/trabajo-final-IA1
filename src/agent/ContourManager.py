@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 import logging
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional
 from dataclasses import dataclass
 
 from src.agent.InternalContourCandidate import InternalContourCandidate
@@ -21,8 +21,11 @@ class GeometricProperties:
     hu_moments: np.ndarray
     has_structural_hole: bool
     hole_confidence: float
+    num_vertices: float
     external_contour: np.ndarray
-    internal_contour: Optional[np.ndarray]
+    internal_contour: Optional[np.ndarray] = None
+    circle_ratio: float = 0.0
+
 
 class ContourManager:
     """
@@ -76,6 +79,21 @@ class ContourManager:
             # 7. Clasificar agujeros estructurales (internos)
             has_structural_hole, hole_confidence = self._classify_structural_hole(hole_candidate)
             
+            # 8. Calcular ratio de círculo mínimo
+            (x, y), radius = cv2.minEnclosingCircle(external_contour)
+            circle_area = np.pi * (radius ** 2)
+            
+            # Evitamos división por cero
+            if circle_area > 0:
+                circle_ratio = float(area / circle_area)
+            else:
+                circle_ratio = 0.0
+
+            # 9. Aproximacion poligonal para conteo de vertices
+            epsilon = 0.015 * perimeter 
+            approx = cv2.approxPolyDP(external_contour, epsilon, True)
+            num_vertices = float(len(approx))
+                
             # Almacenar todas las propiedades calculadas
             self._properties = GeometricProperties(
                 area=area,
@@ -90,6 +108,8 @@ class ContourManager:
                 hu_moments=hu_moments,
                 has_structural_hole=has_structural_hole,
                 hole_confidence=hole_confidence,
+                num_vertices=num_vertices,
+                circle_ratio=circle_ratio,
                 external_contour=external_contour,
                 internal_contour=hole_candidate.contour if hole_candidate else None
             )
