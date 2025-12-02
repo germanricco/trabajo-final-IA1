@@ -16,15 +16,14 @@ class FeatureExtractor:
         # El orden aquí es importante si no usaras DataPreprocessor, pero 
         # con él, nos aseguramos consistencia por nombres.
         self.CLUSTERING_FEATURES = [
-            'area', 
-            'perimeter', 
+            'aspect_ratio',
+            'extent',
             'solidity', 
-            'circularity', 
-            'aspect_ratio', 
+            'circularity',
             'hole_confidence',
             'circle_ratio',
-            'num_vertices',
-            'hu1', 'hu2', 'hu3' # Momentos invariantes
+            'radius_variance',
+            #'num_vertices',
         ]
 
     def extract_features(self, bounding_boxes: List[Tuple], masks: List[np.ndarray]) -> List[Dict[str, Any]]:
@@ -32,8 +31,9 @@ class FeatureExtractor:
         Procesa una lista de objetos detectados y retorna sus características.
         """
         if len(bounding_boxes) != len(masks):
-            raise ValueError(f"Desajuste: {len(bounding_boxes)} bboxes vs {len(masks)} máscaras.")
-
+            self.logger.warning(f"Desajuste: {len(bounding_boxes)} bboxes y {len(masks)} masks.")
+            return []
+        
         features_list = []
 
         for i, (bbox, mask) in enumerate(zip(bounding_boxes, masks)):
@@ -41,6 +41,9 @@ class FeatureExtractor:
                 # 1. Delegar matemática pesada al ContourManager
                 manager = ContourManager(mask)
                 props = manager.calculate_all_properties()
+
+                if props is None:
+                    continue
 
                 # 2. Aplanar datos para el dataset
                 obj_data = self._map_properties_to_dict(props, i)
@@ -62,29 +65,29 @@ class FeatureExtractor:
         Aquí es donde 'elegimos' qué datos le importan a la IA.
         """
         # Seguridad para Momentos de Hu (por si el contorno es degenerado)
-        hu = p.hu_moments if hasattr(p, 'hu_moments') and len(p.hu_moments) >= 3 else [0, 0, 0]
+        hu = p.hu_moments if hasattr(p, 'hu_moments') and len(p.hu_moments) >= 3 else [0.0]*7
 
         return {
             # Metadatos
             'id': obj_id,
             
-            # Características Geométricas Básicas
-            'area': float(p.area),
-            'perimeter': float(p.perimeter),
+            # --- FEATURES DE CLUSTERING (PRIORITARIAS) ---
+            'aspect_ratio': float(p.aspect_ratio),
+            'extent': float(p.extent),
             'solidity': float(p.solidity),
             'circularity': float(p.circularity),
-            'aspect_ratio': float(p.aspect_ratio),
+            'hole_confidence': float(p.hole_confidence),
+            'circle_ratio': float(p.circle_ratio),
+            'radius_variance': float(p.radius_variance),
+            'num_vertices': float(p.num_vertices),
+            
+            # --- FEATURES INFORMATIVAS (DEBUG/UI) ---
+            'area': float(p.area),
+            'perimeter': float(p.perimeter),
             'compactness': float(p.compactness),
-            
-            # Características Estructurales
-            'hole_confidence': float(p.hole_confidence), # Clave para tuercas/arandelas
-            'circle_ratio': float(p.circle_ratio),     # Clave para distinguir círculos
-            'num_vertices': float(p.num_vertices), # Clave para distinguir formas
-            
-            # Momentos de Hu (Invariantes a rotación)
-            'hu1': float(hu[0]), # Dispersión
-            'hu2': float(hu[1]), # Elongación
-            'hu3': float(hu[2]), # Asimetría
+            'hu1': float(hu[0]),
+            'hu2': float(hu[1]),
+            'hu3': float(hu[2]),
         }
 
     def get_recommended_features(self) -> List[str]:

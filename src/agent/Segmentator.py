@@ -149,10 +149,8 @@ class Segmentator:
             y1 = max(0, y - pad)
             x2 = min(w_img, x + w + pad)
             y2 = min(h_img, y + h + pad)
-            
             # ROI (Region of Interest)
             roi_w, roi_h = x2 - x1, y2 - y1
-            
             # Si el ROI es inválido (0 pixels), saltamos
             if roi_w <= 0 or roi_h <= 0: continue
 
@@ -163,17 +161,25 @@ class Segmentator:
             clean_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
             cleaned_roi = cv2.morphologyEx(binary_roi, cv2.MORPH_OPEN, clean_kernel)
 
-            # 2. Soldadura
-            min_dim = min(w, h)
-            k_size = int(min_dim * 0.15)    # kernel_size = 15% de la menor dimensión
-            # Aseguramos que sea impar
-            if k_size % 2 == 0: k_size += 1
-            k_size = max(5, k_size) # Mínimo 5px
+            # 1.75 Antes de soldar realizar distinguir entre tuercas/arandelas y clavos/tornillos
+            aspect_ratio = float(w) / h if h > 0 else 1.0
+            is_compact = 0.6 < aspect_ratio < 1.6
+            if is_compact:
+                # Estrategia Conservadora. No soldar
+                object_roi = cleaned_roi
+            else:
+                # Estrategia Agresiva. Arreglar Tornillos
+                min_dim = min(w, h)
+                k_size = int(min_dim * 0.15)    # kernel_size = 15% de la menor dimensión
+                # Aseguramos que sea impar
+                if k_size % 2 == 0: k_size += 1
+                k_size = max(5, k_size) # Mínimo 5px
+                # 2. Soldadura
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+                # Aplicamos Closing sobre los datos crudos del ROI
+                object_roi = cv2.morphologyEx(cleaned_roi, cv2.MORPH_CLOSE, kernel, iterations=2)
             
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
             
-            # Aplicamos Closing sobre los datos crudos del ROI
-            object_roi = cv2.morphologyEx(cleaned_roi, cv2.MORPH_CLOSE, kernel, iterations=2)
             
             # 3. Limpieza de ruido externo
             object_roi = cv2.morphologyEx(object_roi, cv2.MORPH_OPEN, clean_kernel)
@@ -183,19 +189,29 @@ class Segmentator:
             if cnts_roi:
                 main_cnt = max(cnts_roi, key=cv2.contourArea)
 
-                mask_roi_clean = np.zeros_like(object_roi)
-                cv2.drawContours(mask_roi_clean, [main_cnt], -1, 255, -1)
+                solid_mold = np.zeros_like(object_roi)
+                cv2.drawContours(solid_mold, [main_cnt], -1, 255, -1)
 
                 # Solo permitimos pixels dentro del bbox original
                 rel_x = x - x1
                 rel_y = y - y1
 
                 # Hacemos AND con un rectángulo que representa el bbox original estricto
-                bbox_mask = np.zeros_like(mask_roi_clean)
+                bbox_mask = np.zeros_like(object_roi)
                 cv2.rectangle(bbox_mask, (rel_x, rel_y), (rel_x + w, rel_y + h), 255, -1)
                 
-                # Esto corta cualquier pico que haya crecido más allá de la caja detectada
-                final_object_roi = cv2.bitwise_and(mask_roi_clean, bbox_mask)
+                # C. COMBINACIÓN FINAL (LA CORRECCIÓN)
+                # Tomamos la imagen procesada (object_roi) que TIENE EL AGUJERO.
+                # Usamos solid_mold para borrar el ruido externo (islas flotantes).
+                # Usamos bbox_mask para cortar picos que se salgan del cuadro.
+                
+                # Paso 1: Filtrar ruido externo (quedarse solo con lo que está dentro del contorno principal)
+                # Al hacer AND con solid_mold, borramos lo de afuera, pero mantenemos lo de adentro.
+                # PERO object_roi tiene el agujero negro (0), así que 0 AND 255 = 0. ¡El agujero sobrevive!
+                filtered_roi = cv2.bitwise_and(object_roi, solid_mold)
+                
+                # Paso 2: Recortar al BBox
+                final_object_roi = cv2.bitwise_and(filtered_roi, bbox_mask)
 
             else:
                 final_object_roi = np.zeros_like(object_roi)
