@@ -11,7 +11,8 @@ except ImportError as e:
 class ImagePreprocessor:
     def __init__(self,
                  target_size: Tuple[int, int] = (800, 600),
-                 blur_kernel_size: Union[int, Tuple[int, int]] = (7, 7),
+                 gamma: float = 1.6,
+                 d_bFilter = 10,
                  binarization_block_size: int = 13,
                  binarization_C: int = 2,
                  open_kernel_size: Union[int, Tuple[int, int]] = (3, 3),
@@ -29,7 +30,8 @@ class ImagePreprocessor:
             * close_kernel_size (int|tuple): Tamaño del kernel para la operación de cierre.
         """
         self.target_size = target_size
-        self.blur_kernel_size = blur_kernel_size
+        self.gamma = gamma
+        self.d_bFilter = d_bFilter
         self.binarization_block_size = binarization_block_size
         self.binarizacion_C = binarization_C
         self.open_kernel_size = open_kernel_size
@@ -49,22 +51,24 @@ class ImagePreprocessor:
         standardized_image, padding_info = self._standardize_size(gray_image)
         self.logger.debug("Imagen redimensionada a tamaño estándar.")
 
+        contrasted_image = self._apply_gamma(standardized_image, gamma=self.gamma)
+        self.logger.debug("Gamma Correction aplicado.")
+
         # Mejora de Contraste (CLAHE)
-        # Esto ayuda mucho con el brillo metálico
-        enhanced_image = self._apply_clahe(standardized_image)
-        self.logger.debug("CLAHE aplicado para mejora de contraste.")
+        # enhanced_image = self._apply_clahe(standardized_image,
+        #                                    clip_limit=self.clahe_clip_limit,
+        #                                    tile_grid_size=(7, 7))
+        # self.logger.debug("CLAHE aplicado para mejora de contraste.")
 
-        # Apply Gaussian blur
-        # blurred_image = self._apply_gaussian_blur(enhanced_image,
-        #                                           kernel_size=self.blur_kernel_size)
-        # self.logger.debug("Filtro Gaussian Blur aplicado.")
-
-        # Blur (Cambio estratégico: Bilateral o Gaussian muy suave)
-        # Usamos Bilateral para mantener las esquinas de las tuercas
-        blurred_image = self._apply_bilateral_filter(enhanced_image)
+        # Aplicar Filtro Bilateral
+        blurred_image = self._apply_bilateral_filter(contrasted_image,
+                                                     self.d_bFilter)
         self.logger.debug("Filtro Bilateral aplicado (bordes preservados).")
 
-        # Apply adaptive binarization
+        # Aplicar binarizacion adaptativa
+        #! === NOTA SOBRE THRESDHOLD_TYPE: === 
+        # cv2.THRESH_BINARY_INV -> Objeto negro. Fondo Blanco
+        # cv2.THRESH_BINARY -> Objeto Blanco. Fondo Negro (Ideal para findContours)
         binarized_image = self._apply_adaptive_binarization(
             blurred_image,
             block_size=self.binarization_block_size,
@@ -73,7 +77,7 @@ class ImagePreprocessor:
         )
         self.logger.debug("Binarización adaptativa aplicada.")
 
-        # Clean binarization result
+        # Limpiar binarizacion
         cleaned_image = self._clean_binarization(
             binarized_image,
             open_kernel_size=self.open_kernel_size,
@@ -81,6 +85,7 @@ class ImagePreprocessor:
         )
         self.logger.debug("Binarización limpiada con operaciones morfológicas.")
         
+        # Limpiar bordes
         final_image = self._mask_padding_artifacts(
             cleaned_image,
             padding_info,
@@ -88,6 +93,7 @@ class ImagePreprocessor:
         )
         self.logger.debug("Bordes limpiados.")
 
+        # Retornar
         return final_image
 
 
@@ -124,93 +130,67 @@ class ImagePreprocessor:
         Redimensiona la imagen manteniendo el Aspect Ratio (proporción).
         Agrega bordes negros (padding) para llegar al target_size sin deformar.
         """
+        # Tomar width, height (target y original)
         target_w, target_h = self.target_size
         h, w = image.shape[:2]
         
-        # 1. Calcular factor de escala para ajustar sin recortar ni deformar
+        # Calcular factor de escala para ajustar sin recortar ni deformar
         scale = min(target_w / w, target_h / h)
         new_w = int(w * scale)
         new_h = int(h * scale)
         
-        # 2. Resize proporcional
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        # Resize proporcional
+        resized_image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
         
-        # 3. Calcular padding para centrar
+        # Calcular padding para centrar
         delta_w = target_w - new_w
         delta_h = target_h - new_h
         top, bottom = delta_h // 2, delta_h - (delta_h // 2)
         left, right = delta_w // 2, delta_w - (delta_w // 2)
         
-        # 4. Agregar bordes (Letterbox)
+        # Agregar bordes (Letterbox)
         # BORDER_CONSTANT agrega color sólido (0 = negro)
-        new_image = cv2.copyMakeBorder(resized, top, bottom, left, right, 
+        new_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, 
                                        cv2.BORDER_REPLICATE)
         
         # Nos dice cuanto padding se agregó
         return new_image, (top, bottom, left, right)
     
 
-    def _apply_clahe(self, image: np.ndarray, clip_limit: float = 2.0, tile_grid_size: tuple = (8, 8)) -> np.ndarray:
+    def _apply_gamma(self, image: np.ndarray, gamma: float = 1.5) -> np.ndarray:
         """
-        Aplica Contrast Limited Adaptive Histogram Equalization.
-        Ideal para resaltar texturas metálicas y corregir iluminación desigual.
+        Aumenta el contraste en las zonas oscuras (aplasta el ruido)
+        sin saturar las zonas claras.
+        gamma > 1: Oscurece medios tonos (quita ruido de fondo).
+        gamma < 1: Aclara sombras.
         """
+        invGamma = 1.0 / gamma
+        table = np.array([((i / 255.0) ** invGamma) * 255
+                        for i in np.arange(0, 256)]).astype("uint8")
+        return cv2.LUT(image, table)
+
+
+    def _apply_clahe(self, image: np.ndarray, clip_limit: float = 2.0, tile_grid_size: tuple = (7, 7)) -> np.ndarray:
+        """
+        Aplica CLAHE (Contrast Limited Adaptive Histogram Equalization).
+        """
+        # Crear objeto CLAHE
         clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+        # Aplicar CLAHE y retornar
         return clahe.apply(image)
     
 
-    def _apply_bilateral_filter(self, image: np.ndarray) -> np.ndarray:
+    def _apply_bilateral_filter(self, image: np.ndarray, d_bFilter: int = 2) -> np.ndarray:
         """
-        Reemplazo inteligente del GaussianBlur.
-        Elimina ruido (grano) pero MANTIENE los bordes filosos (esquinas de tuercas).
+        Reemplazo de GaussianBlur. Elimina ruido pero manteniendo los bordes.
         
-        d: Diámetro del vecindario (5-9 está bien).
-        sigmaColor: Cuánto se pueden mezclar colores (75 es estándar).
-        sigmaSpace: Qué tan lejos se mezclan píxeles (75 es estándar).
+        * d: Diámetro del vecindario (5-9 está bien).
+        * sigmaColor: Cuánto se pueden mezclar colores (75 es estándar).
+        * sigmaSpace: Qué tan lejos se mezclan píxeles (75 es estándar).
         """
-        # Si prefieres seguir con Gaussian, usa kernel (3,3). 
-        # Bilateral es más lento pero mejor geométricamente.
-        return cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)
-
-    def _apply_gaussian_blur(self, image: np.ndarray,
-                             kernel_size: Union[int, Tuple[int, int]] = (7, 7),
-                             sigmaX: float = 0) -> np.ndarray:
-        """
-        Aplica un filtro Gaussian Blur a la imagen.
-
-        Args:
-            * image (np.ndarray): Imagen de entrada (BGR o escala de grises).
-            * kernel_size (int|tuple): Tamaño del kernel (k, k) o un entero k. Debe ser impar y > 0.
-            * sigmaX (float): Desviación estándar en X; 0 calcula automáticamente según kernel.
-
-        Returns:
-            * np.ndarray: Imagen filtrada con Gaussian Blur.
-
-        Raises:
-            ValueError: Si la imagen es inválida o kernel_size no es adecuado.
-        """
-        if image is None or image.size == 0:
-            raise ValueError("Imagen de entrada inválida.")
-        
-        # Normalizar kernel_size a tupla (kx, ky)
-        if isinstance(kernel_size, int):
-            kx = ky = kernel_size
-        else:
-            kx, ky = kernel_size
-
-        # Validar kernel impar y positivo
-        if kx <= 0 or ky <= 0 or kx % 2 == 0 or ky % 2 == 0:
-            raise ValueError("kernel_size debe ser impar y mayor que 0, p.ej. 3,5,7,...")
-
-        # Aplicar Gaussian Blur
-        blurred = cv2.GaussianBlur(image, (kx, ky), sigmaX)
-
-        return blurred
+        return cv2.bilateralFilter(image, d=d_bFilter, sigmaColor=100, sigmaSpace=100)
 
 
-    #! === NOTA SOBRE THRESDHOLD_TYPE: === 
-    # cv2.THRESH_BINARY_INV -> Objeto negro. Fondo Blanco
-    # cv2.THRESH_BINARY -> Objeto Blanco. Fondo Negro (Ideal para findContours)
     def _apply_adaptive_binarization(self,
                                      blurred_image: np.ndarray,
                                      max_value: int = 255,
