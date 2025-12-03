@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 import logging
-from typing import Dict, Tuple, Optional
+from typing import Tuple, Optional
 from dataclasses import dataclass
 
 @dataclass

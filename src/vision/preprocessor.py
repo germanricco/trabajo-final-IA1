@@ -1,9 +1,7 @@
 try: 
-    from tkinter import Canvas
     import cv2
     import numpy as np
-    import matplotlib.pyplot as plt
-    from typing import List, Tuple, Union, Optional
+    from typing import Tuple, Union
     import logging
 except ImportError as e:
     raise ImportError(f"Faltan dependencias necesarias: {e}")
@@ -23,11 +21,13 @@ class ImagePreprocessor:
 
         Args:
             * target_size (tuple): Tamaño objetivo (ancho, alto) para estandarización.
-            * blur_kernel_size (int|tuple): Tamaño del kernel para el filtro Gaussian Blur.
+            * gamma (float): Valor de gamma para la corrección gamma.
+            * d_bFilter (int): Diametro del filtro bilateral.
             * binarization_block_size (int): Tamaño del vecindario para la binarización adaptativa.
             * binarization_C (int): Constante a restar de la media/gaussiana local.
             * open_kernel_size (int|tuple): Tamaño del kernel para la operación de apertura.
             * close_kernel_size (int|tuple): Tamaño del kernel para la operación de cierre.
+            * clear_border_margin (int): Margen para limpiar los bordes.
         """
         self.target_size = target_size
         self.gamma = gamma
@@ -43,32 +43,23 @@ class ImagePreprocessor:
 
 
     def process(self, image: np.ndarray) -> np.ndarray:
-        # Convert to grayscale
+        # Escala de Grises
         gray_image = self._convert_to_grayscale(image)
         self.logger.debug("Imagen convertida a escala de grises.")
 
-        # Standardize size
+        # Ajustar tamano
         standardized_image, padding_info = self._standardize_size(gray_image)
         self.logger.debug("Imagen redimensionada a tamaño estándar.")
 
         contrasted_image = self._apply_gamma(standardized_image, gamma=self.gamma)
         self.logger.debug("Gamma Correction aplicado.")
 
-        # Mejora de Contraste (CLAHE)
-        # enhanced_image = self._apply_clahe(standardized_image,
-        #                                    clip_limit=self.clahe_clip_limit,
-        #                                    tile_grid_size=(7, 7))
-        # self.logger.debug("CLAHE aplicado para mejora de contraste.")
-
-        # Aplicar Filtro Bilateral
+        # Filtro Bilateral
         blurred_image = self._apply_bilateral_filter(contrasted_image,
                                                      self.d_bFilter)
         self.logger.debug("Filtro Bilateral aplicado (bordes preservados).")
 
-        # Aplicar binarizacion adaptativa
-        #! === NOTA SOBRE THRESDHOLD_TYPE: === 
-        # cv2.THRESH_BINARY_INV -> Objeto negro. Fondo Blanco
-        # cv2.THRESH_BINARY -> Objeto Blanco. Fondo Negro (Ideal para findContours)
+        # Binarizacion Adaptativa
         binarized_image = self._apply_adaptive_binarization(
             blurred_image,
             block_size=self.binarization_block_size,
@@ -77,7 +68,7 @@ class ImagePreprocessor:
         )
         self.logger.debug("Binarización adaptativa aplicada.")
 
-        # Limpiar binarizacion
+        # Limpiar Binarizacion
         cleaned_image = self._clean_binarization(
             binarized_image,
             open_kernel_size=self.open_kernel_size,
@@ -85,7 +76,7 @@ class ImagePreprocessor:
         )
         self.logger.debug("Binarización limpiada con operaciones morfológicas.")
         
-        # Limpiar bordes
+        # Limpiar Bordes
         final_image = self._mask_padding_artifacts(
             cleaned_image,
             padding_info,

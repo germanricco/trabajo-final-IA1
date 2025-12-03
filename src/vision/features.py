@@ -1,7 +1,7 @@
 import logging
 import numpy as np
 from typing import List, Dict, Any, Tuple
-from src.agent.ContourManager import ContourManager
+from src.vision.contours import ContourManager
 
 class FeatureExtractor:
     """
@@ -17,13 +17,10 @@ class FeatureExtractor:
         # con él, nos aseguramos consistencia por nombres.
         self.CLUSTERING_FEATURES = [
             'aspect_ratio',
-            'extent',
             'solidity', 
-            'circularity',
             'hole_confidence',
             'circle_ratio',
             'radius_variance',
-            #'num_vertices',
         ]
 
     def extract_features(self, bounding_boxes: List[Tuple], masks: List[np.ndarray]) -> List[Dict[str, Any]]:

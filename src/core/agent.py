@@ -1,5 +1,5 @@
 import logging
-from src.agent.ImageClassifier import ImageClassifier
+from vision.classifier import ImageClassifier
 
 # Placeholder para el futuro
 # from src.agent.VoiceRecognizer import VoiceRecognizer

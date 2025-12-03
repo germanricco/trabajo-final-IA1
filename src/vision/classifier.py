@@ -6,13 +6,11 @@ from collections import Counter
 import matplotlib.image as mpimg
 
 # Componentes del pipeline
-from src.agent.ImagePreprocessor import ImagePreprocessor
-from src.agent.Segmentator import Segmentator
-from src.agent.ContourManager import ContourManager
-from src.agent.FeatureExtractor import FeatureExtractor
-from src.agent.DataPreprocessor import DataPreprocessor
-from src.agent.KMeans import KMeansModel
-from src.agent.Visualization import ClusterVisualizer
+from src.vision.preprocessor import ImagePreprocessor
+from src.vision.segmentator import Segmentator
+from src.vision.features import FeatureExtractor
+from src.vision.data_prep import DataPreprocessor
+from src.vision.kmeans import KMeansModel
 
 class ImageClassifier:
     """
@@ -24,29 +22,41 @@ class ImageClassifier:
         self.logger = logging.getLogger(__name__)
         self.models_dir = models_dir
 
-        # Componentes del pipeline
+        # Componentes
         self.img_prep = ImagePreprocessor(
-            target_size = (800,600),
-            blur_kernel_size = (7, 7),
-            binarization_block_size = 29,
-            binarization_C = -13,
+            target_size = (600,800),
+            gamma = 1.7,
+            d_bFilter = 5,
+            binarization_block_size = 31,
+            binarization_C = -11,
             open_kernel_size = (5, 5),
-            close_kernel_size = (7, 7)
+            close_kernel_size = (9, 9),
+            clear_border_margin = 5
         )
-        
+    
         self.segmentator = Segmentator(
-            min_contour_area=100,
-            merge_close_boxes=True,
-            overlap_threshold=0.2,
-            max_distance=5,
-            max_aspect_ratio=15.0,
-            min_mask_area=100,
-            mask_kernel_size=11
+            min_area = 80,
+            merge_distance = 25
         )
 
         self.feature_extractor = FeatureExtractor()
+
         self.data_prep = DataPreprocessor()
-        self.model = KMeansModel(n_clusters=4, n_init=10)
+
+        self.model = KMeansModel(
+            n_clusters=4,
+            n_init=10
+        )
+
+        # ESTRATEGIA DE PESOS
+        self.feature_weights = {
+            'radius_variance': 12.0,
+            'circle_ratio': 8.0,
+            'hole_confidence': 2.0,
+            'aspect_ratio': 0.5,        # Ya es muy influyente naturalmente
+            'solidity': 1.0
+            
+        }
 
         self.cluster_mapping = {}  # Mapear ID de cluster a etiqueta semántica
         self.is_ready = False
@@ -132,7 +142,11 @@ class ImageClassifier:
         
         # 3. Normalización (FIT + TRANSFORM)
         target_cols = self.feature_extractor.get_recommended_features()
-        X_train = self.data_prep.fit_transform(train_features, target_features=target_cols)
+        X_train = self.data_prep.fit_transform(
+            train_features,
+            target_features=target_cols,
+            weights=self.feature_weights
+        )
         
         # 4. Entrenamiento K-Means
         print("🧠 Entrenando K-Means...")
@@ -164,7 +178,7 @@ class ImageClassifier:
             return 0.0
 
         # Normalización (SOLO TRANSFORM, usar medias de train)
-        X_val = self.data_prep.transform(val_features)
+        X_val = self.data_prep.transform(val_features, weights=self.feature_weights)
         
         # Predicción
         predictions = self.model.predict(X_val)
@@ -240,7 +254,7 @@ class ImageClassifier:
             return []
             
         # Normalizar y Predecir
-        X = self.data_prep.transform(features)
+        X = self.data_prep.transform(features, weights=self.feature_weights)
         cluster_ids = self.model.predict(X)
         
         # Traducir IDs a nombres

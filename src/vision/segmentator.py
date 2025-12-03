@@ -15,7 +15,8 @@ class Segmentator:
         Inicializa el segmentador.
 
         Args:
-            min_area (float): Área mínima absoluta para considerar un contorno válido.
+            * min_area (float): Área mínima absoluta para considerar un contorno válido.
+            * merge_distance (int): Distancia máxima para fusionar contornos.
         """
 
         self.min_area = min_area
@@ -122,7 +123,6 @@ class Segmentator:
     def _are_close(self, r1, r2, dist):
         """Devuelve True si los rectángulos están a menos de 'dist' pixeles."""
         # r = [x1, y1, x2, y2]
-        # Si se solapan o están cerca en X y en Y
         
         # Expandir r1 virtualmente por la distancia
         return (r1[0] - dist < r2[2] and r1[2] + dist > r2[0] and
