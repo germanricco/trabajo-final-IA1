@@ -79,7 +79,7 @@ class KMeansModel:
                     self.logger.debug(f"Iteración {i}: Movimiento = {shift:.6f}")
 
                 if shift < self.tol:
-                    self.logger.info(f"✅ Convergencia alcanzada en iteración {i}. Movimiento: {shift:.6f}")
+                    self.logger.debug(f"✅ Convergencia alcanzada en iteración {i}. Movimiento: {shift:.6f}")
                     break
             
             # --- Fin de la ejecución. Calculamos la nota (Inercia) ---

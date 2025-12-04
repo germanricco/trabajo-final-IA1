@@ -2,8 +2,8 @@ import os
 import logging
 import random
 import pickle
+import cv2
 from collections import Counter
-import matplotlib.image as mpimg
 
 # Componentes del pipeline
 from src.vision.preprocessor import ImagePreprocessor
@@ -14,15 +14,14 @@ from src.vision.kmeans import KMeansModel
 
 class ImageClassifier:
     """
-    Subsistema de Vision: Encargado de cargar datos, entrenar KMeans
-    validar resultados y clasificar nuevas imagenes.
+    Subsistema de Vision: Encapsula toda la complejidad del ML (K-Means).
     """
 
     def __init__(self, models_dir="models"):
         self.logger = logging.getLogger(__name__)
         self.models_dir = models_dir
 
-        # Componentes
+        # Configuracion de Componentes
         self.img_prep = ImagePreprocessor(
             target_size = (600,800),
             gamma = 1.7,
@@ -45,24 +44,91 @@ class ImageClassifier:
 
         self.model = KMeansModel(
             n_clusters=4,
-            n_init=10
+            n_init=50
         )
 
-        # ESTRATEGIA DE PESOS
+        # Pesos definidos para cada feature
         self.feature_weights = {
-            'radius_variance': 12.0,
-            'circle_ratio': 8.0,
+            'radius_variance': 10.0,
+            'circle_ratio': 15.0,
             'hole_confidence': 2.0,
-            'aspect_ratio': 0.5,        # Ya es muy influyente naturalmente
-            'solidity': 1.0
-            
+            'aspect_ratio': 0.4,
+            'solidity': 2.0
         }
 
-        self.cluster_mapping = {}  # Mapear ID de cluster a etiqueta semántica
+        self.cluster_mapping = {}
         self.is_ready = False
 
         if not os.path.exists(self.models_dir):
             os.makedirs(self.models_dir)
+    
+    def predict(self, image_path: str) -> list:
+        """
+        Realiza la inferencia completa sobre una imagen nueva.
+        Retorna una lista de diccionarios con toda la info necesaria para la UI.
+        """
+        if not self.is_ready:
+            raise RuntimeError("El modelo no está entrenado.")
+
+        # 1. Ejecutar Pipeline (Obtener Features y BBoxes)
+        # Pasamos label=None porque es inferencia
+        features_list, _ = self._pipeline_process([(image_path, None)])
+        
+        if not features_list:
+            return []
+
+        # 2. Preprocesamiento de Datos (Normalización + Pesos)
+        X = self.data_prep.transform(features_list, weights=self.feature_weights)
+        
+        # 3. Inferencia (K-Means)
+        cluster_ids = self.model.predict(X)
+        
+        # 4. Construcción de Respuesta
+        results = []
+        for i, cid in enumerate(cluster_ids):
+            label = self.cluster_mapping.get(cid, "desconocido")
+            
+            # Recuperamos el bbox que guardamos en el diccionario de features
+            # (FeatureExtractor lo guarda bajo la key 'bbox')
+            bbox = features_list[i].get('bbox')
+            
+            results.append({
+                "label": label,
+                "bbox": bbox,
+                "cluster_id": int(cid)
+            })
+            
+        return results
+
+    def _pipeline_process(self, image_paths_with_labels):
+        """
+        Método interno: Orquesta Preproceso -> Segmentación -> Features.
+        """
+        features_list = []
+        labels_list = []
+        
+        for img_path, label in image_paths_with_labels:
+            try:
+                # Carga con OpenCV para consistencia de canales (BGR)
+                image = cv2.imread(img_path)
+                if image is None: continue
+
+                processed_img = self.img_prep.process(image)
+                seg_res = self.segmentator.process(processed_img)
+                
+                if seg_res['total_objects'] == 0:
+                    continue
+
+                feats = self.feature_extractor.extract_features(seg_res['bounding_boxes'], seg_res['masks'])
+                
+                features_list.extend(feats)
+                if label:
+                    labels_list.extend([label] * len(feats))
+                    
+            except Exception as e:
+                self.logger.warning(f"Error procesando {img_path}: {e}")
+                
+        return features_list, labels_list
     
     def load_and_split_data(self, data_path, split_ratio=0.8):
         """
@@ -94,75 +160,105 @@ class ImageClassifier:
 
         self.logger.info(f"Datos cargados. Entrenamiento: {len(train_data)}, Validación: {len(val_data)}.")
         return train_data, val_data
-    
 
-    def _pipeline_process(self, image_paths_with_labels):
+    def train(self, data_path: str, attempts: int = 15) -> float: # Subimos intentos por default
         """
-        Ejecuta Preproceso -> Segmentación -> Feature Extraction para una lista de imagenes.
-        Retorna:
-            features (lista de dicts), labels (lista de strs), bboxes (lista)
+        Entrena buscando un modelo que no solo tenga buena precisión,
+        sino que logre distinguir las 4 clases fundamentales.
         """
-        features_list = []
-        labels_list = []
+        self.logger.info(f"🏆 Iniciando Torneo de Entrenamiento ({attempts} rondas)...")
         
-        for img_path, label in image_paths_with_labels:
-            try:
-                # 1. Pipeline visual
-                image = mpimg.imread(img_path)
+        best_accuracy = 0.0
+        current_weights = self.feature_weights
+        
+        # Lista de clases obligatorias
+        REQUIRED_CLASSES = {"arandelas", "clavos", "tornillos", "tuercas"}
 
-                processed_img = self.img_prep.process(image)
-                seg_res = self.segmentator.process(processed_img)
+        for i in range(1, attempts + 1):
+            # 1. División de datos
+            train_set, val_set = self.load_and_split_data(data_path, split_ratio=0.8)
+            
+            # 2. Procesamiento
+            train_features, train_labels = self._pipeline_process(train_set)
+            if not train_features: continue
+
+            target_cols = self.feature_extractor.get_recommended_features()
+            
+            # Instancias temporales
+            temp_data_prep = DataPreprocessor() 
+            # Aumentamos n_init a 100 para obligar a K-Means a probar muchas semillas
+            temp_model = KMeansModel(n_clusters=4, n_init=100, max_iters=500) 
+            
+            # 3. Fit
+            X_train = temp_data_prep.fit_transform(
+                train_features,
+                target_features=target_cols,
+                weights=current_weights
+            )
+            
+            temp_model.fit(X_train)
+            
+            # 4. Mapeo
+            predicted_clusters = temp_model.predict(X_train)
+            temp_mapping = {}
+            found_classes = set() # Rasteamos qué clases encontró este modelo
+            
+            for k in range(temp_model.n_clusters):
+                indices = [idx for idx, x in enumerate(predicted_clusters) if x == k]
+                if indices:
+                    labels = [train_labels[idx] for idx in indices]
+                    most_common = Counter(labels).most_common(1)[0][0]
+                    temp_mapping[k] = most_common
+                    found_classes.add(most_common)
+                else:
+                    temp_mapping[k] = "desconocido"
+            
+            # --- CHECK DE DIVERSIDAD (NUEVO) ---
+            # Si el modelo encontró menos de 4 clases (ej: duplicó arandelas y olvidó tuercas),
+            # lo penalizamos severamente o lo descartamos.
+            missing_classes = REQUIRED_CLASSES - found_classes
+            if missing_classes:
+                print(f"   ⚠️ Round {i} descartado: No encontró {missing_classes}")
+                continue # Saltamos directamente al siguiente intento
+            
+            # 5. Validación
+            val_features, val_labels = self._pipeline_process(val_set)
+            if not val_features: continue
+            
+            X_val = temp_data_prep.transform(val_features, weights=current_weights)
+            predictions = temp_model.predict(X_val)
+            
+            hits = 0
+            for idx, cid in enumerate(predictions):
+                pred_lbl = temp_mapping.get(cid, "desc")
+                if pred_lbl == val_labels[idx]: hits += 1
+            
+            current_accuracy = hits / len(predictions)
+            
+            print(f"   ROUND {i}: Precisión {current_accuracy:.2%}")
+            
+            # 6. Selección del Campeón
+            if current_accuracy > best_accuracy:
+                best_accuracy = current_accuracy
                 
-                if seg_res['total_objects'] == 0:
-                    continue
-
-                # 2. Extracción
-                feats = self.feature_extractor.extract_features(seg_res['bounding_boxes'], seg_res['masks'])
+                self.model = temp_model
+                self.data_prep = temp_data_prep
+                self.cluster_mapping = temp_mapping
+                self.is_ready = True
                 
-                # 3. Acumulación (Asumimos que si la foto es de "tornillos", todos los objetos lo son)
-                features_list.extend(feats)
-                if label:
-                    labels_list.extend([label] * len(feats))
-                    
-            except Exception as e:
-                self.logger.warning(f"Error procesando {img_path}: {e}")
+                self.save_model()
+                print(f"   ✨ ¡Nuevo Campeón! ({best_accuracy:.2%}) Guardado.")
                 
-        return features_list, labels_list
-
-    def train(self, data_path):
-        """
-        Entrena el modelo de K-Means.
-        """
-        # 1. División de datos
-        train_set, val_set = self.load_and_split_data(data_path, split_ratio=0.8)
+                if best_accuracy > 0.98:
+                    break
         
-        # 2. Procesamiento del SET DE ENTRENAMIENTO
-        print("⚙️ Procesando set de entrenamiento...")
-        train_features, train_labels = self._pipeline_process(train_set)
-        
-        # 3. Normalización (FIT + TRANSFORM)
-        target_cols = self.feature_extractor.get_recommended_features()
-        X_train = self.data_prep.fit_transform(
-            train_features,
-            target_features=target_cols,
-            weights=self.feature_weights
-        )
-        
-        # 4. Entrenamiento K-Means
-        print("🧠 Entrenando K-Means...")
-        self.model.fit(X_train)
-        
-        # 5. Mapeo Cluster -> Etiqueta (Usando las etiquetas reales de Train)
-        predicted_clusters = self.model.predict(X_train)
-        self._create_cluster_mapping(predicted_clusters, train_labels)
-        
-        self.is_ready = True
-        
-        # 6. Validación (Opcional pero recomendada aquí)
-        accuracy = self.validate(val_set)
-        
-        self.save_model()
-        return accuracy
+        if self.is_ready:
+            self.load_model()
+            self.logger.info(f"🏁 Torneo finalizado. Ganador: {best_accuracy:.2%}")
+        else:
+            self.logger.error("❌ Fallo total: Ningún modelo logró identificar las 4 clases.")
+            
+        return best_accuracy
     
     def validate(self, val_set_paths):
         """
@@ -241,29 +337,6 @@ class ImageClassifier:
             print("\n✨ ¡CLASIFICACIÓN PERFECTA EN VALIDACIÓN!")
 
         return accuracy
-
-    def predict_single_image(self, image_path):
-        """Interfaz simple para predecir nuevos datos."""
-        if not self.is_ready:
-            raise RuntimeError("Modelo no entrenado.")
-            
-        # Pipeline para una sola imagen (label=None)
-        features, _ = self._pipeline_process([(image_path, None)])
-        
-        if not features:
-            return []
-            
-        # Normalizar y Predecir
-        X = self.data_prep.transform(features, weights=self.feature_weights)
-        cluster_ids = self.model.predict(X)
-        
-        # Traducir IDs a nombres
-        results = []
-        for cid in cluster_ids:
-            label = self.cluster_mapping.get(cid, "desconocido")
-            results.append(label)
-            
-        return results
     
     def _create_cluster_mapping(self, cluster_ids, true_labels):
         """Asigna una etiqueta mayoritaria a cada cluster."""
@@ -297,10 +370,3 @@ class ImageClassifier:
                 self.is_ready = True
             return True
         return False
-    
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    classifier = ImageClassifier()
-    # Aquí podrías agregar código para entrenar o probar el clasificador
-
