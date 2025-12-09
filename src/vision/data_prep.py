@@ -45,8 +45,11 @@ class DataPreprocessor:
         """
         if not self.is_fitted:
             raise RuntimeError("El preprocesador no ha sido entrenado (fit).")
-            
-        X_norm = self._to_matrix(features_list)
+        
+        # Convertir a matriz
+        X = self._to_matrix(features_list)
+
+        X_norm = (X - self.means_) / self.stds_
         
         if weights:
             for feature_name, weight in weights.items():

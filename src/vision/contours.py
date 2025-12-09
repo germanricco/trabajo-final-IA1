@@ -84,6 +84,7 @@ class GeometricProperties:
     num_vertices: float
     circle_ratio: float 
     radius_variance:float
+    hole_area_ratio: float
 
     # Estructurales
     has_structural_hole: bool
@@ -190,7 +191,11 @@ class ContourManager:
             epsilon = 0.020 * perimeter 
             approx = cv2.approxPolyDP(external_contour, epsilon, True)
             num_vertices = float(len(approx))
-                
+
+            if hole_candidate:
+                hole_area_ratio = hole_candidate.area_ratio
+            else:
+                hole_area_ratio = 0.0
             # Almacenar todas las propiedades calculadas
             self._properties = GeometricProperties(
                 area=area,
@@ -209,6 +214,7 @@ class ContourManager:
                 num_vertices=num_vertices,
                 circle_ratio=circle_ratio,
                 radius_variance=radius_variance,
+                hole_area_ratio=hole_area_ratio,
                 external_contour=external_contour,
                 internal_contour=hole_candidate.contour if hole_candidate else None
             )
@@ -267,7 +273,7 @@ class ContourManager:
 
                 # Filtro de ruido para agujeros
                 # Debe ser al menos 10px y no más grande que el 60% del objeto (arandelas finas)
-                if hole_area < 10 or hole_area > 0.9 * external_area:
+                if hole_area < 5 or hole_area > 0.9 * external_area:
                     continue
 
                 # Creamos el candidato

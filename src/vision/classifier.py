@@ -22,20 +22,18 @@ class ImageClassifier:
         self.models_dir = models_dir
 
         # Configuracion de Componentes
-        self.img_prep = ImagePreprocessor(
-            target_size = (600,800),
-            gamma = 1.7,
-            d_bFilter = 5,
-            binarization_block_size = 31,
-            binarization_C = -11,
-            open_kernel_size = (5, 5),
-            close_kernel_size = (9, 9),
-            clear_border_margin = 5
-        )
+        self.img_prep = ImagePreprocessor(target_size = (960,1280),
+                                gamma = 1.7,
+                                d_bFilter = 8,
+                                binarization_block_size = 27,
+                                binarization_C = -5,
+                                open_kernel_size = (3, 3),
+                                close_kernel_size = (3, 3),
+                                clear_border_margin = 5)
     
         self.segmentator = Segmentator(
-            min_area = 80,
-            merge_distance = 25
+            min_area = 20,
+            merge_distance = 15
         )
 
         self.feature_extractor = FeatureExtractor()
@@ -49,11 +47,11 @@ class ImageClassifier:
 
         # Pesos definidos para cada feature
         self.feature_weights = {
-            'radius_variance': 10.0,
-            'circle_ratio': 15.0,
+            'radius_variance': 6.0,     # Apoyo para circle_ratio
+            'circle_ratio': 16.0,       # Principal separador entre tuercas vs. arandelas
             'hole_confidence': 2.0,
-            'aspect_ratio': 0.4,
-            'solidity': 2.0
+            'aspect_ratio': 3.0,
+            'solidity': 1.0,
         }
 
         self.cluster_mapping = {}
@@ -187,7 +185,7 @@ class ImageClassifier:
             # Instancias temporales
             temp_data_prep = DataPreprocessor() 
             # Aumentamos n_init a 100 para obligar a K-Means a probar muchas semillas
-            temp_model = KMeansModel(n_clusters=4, n_init=100, max_iters=500) 
+            temp_model = KMeansModel(n_clusters=4, n_init=50, max_iters=500) 
             
             # 3. Fit
             X_train = temp_data_prep.fit_transform(
@@ -252,6 +250,7 @@ class ImageClassifier:
                 if best_accuracy > 0.98:
                     break
         
+        # Restauración final
         if self.is_ready:
             self.load_model()
             self.logger.info(f"🏁 Torneo finalizado. Ganador: {best_accuracy:.2%}")
