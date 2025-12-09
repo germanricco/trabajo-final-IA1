@@ -51,6 +51,7 @@ class ImagePreprocessor:
         standardized_image, padding_info = self._standardize_size(gray_image)
         self.logger.debug("Imagen redimensionada a tamaño estándar.")
 
+        # Gamma
         contrasted_image = self._apply_gamma(standardized_image, gamma=self.gamma)
         self.logger.debug("Gamma Correction aplicado.")
 
@@ -159,16 +160,6 @@ class ImagePreprocessor:
         table = np.array([((i / 255.0) ** invGamma) * 255
                         for i in np.arange(0, 256)]).astype("uint8")
         return cv2.LUT(image, table)
-
-
-    def _apply_clahe(self, image: np.ndarray, clip_limit: float = 2.0, tile_grid_size: tuple = (7, 7)) -> np.ndarray:
-        """
-        Aplica CLAHE (Contrast Limited Adaptive Histogram Equalization).
-        """
-        # Crear objeto CLAHE
-        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
-        # Aplicar CLAHE y retornar
-        return clahe.apply(image)
     
 
     def _apply_bilateral_filter(self, image: np.ndarray, d_bFilter: int = 2) -> np.ndarray:

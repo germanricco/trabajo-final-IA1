@@ -50,7 +50,7 @@ class Segmentator:
             
             # Filtro 2: Relacion de aspecto extrema
             aspect_ratio = float(w) / h if h > 0 else 0
-            if aspect_ratio > 10 or aspect_ratio < 0.1:
+            if aspect_ratio > 25 or aspect_ratio < 0.05:
                 continue
 
             raw_contours.append(cnt)
