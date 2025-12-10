@@ -47,7 +47,7 @@ class ImageClassifier:
 
         # Pesos definidos para cada feature
         self.feature_weights = {
-            'radius_variance': 6.0,     # Apoyo para circle_ratio
+            'radius_variance': 7.0,     # Apoyo para circle_ratio
             'circle_ratio': 16.0,       # Principal separador entre tuercas vs. arandelas
             'hole_confidence': 2.0,
             'aspect_ratio': 3.0,

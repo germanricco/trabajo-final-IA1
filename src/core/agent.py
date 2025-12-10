@@ -1,9 +1,12 @@
 import logging
 import os
+from collections import Counter
 from typing import List, Dict, Optional, Any
 
 # Importacion de subsistema de vision
 from src.vision.classifier import ImageClassifier
+# Importacion de subsistema de estimacion bayesiana
+from src.analysis.estimation import BoxEstimator
 
 class HardwareAgent:
     """
@@ -30,9 +33,17 @@ class HardwareAgent:
 
         self.models_dir = models_dir
         
-        # --- Subsistemas ---
+        # Sistema de Vision
         self.vision: Optional[ImageClassifier] = None
         self._init_vision_system()
+
+        # Estimador Bayesiano
+        self.box_estimator = BoxEstimator()
+
+
+    # =========================================================================
+    # SISTEMA DE VISION ARTIFICIAL
+    # =========================================================================
 
     def _init_vision_system(self):
         """
@@ -47,7 +58,6 @@ class HardwareAgent:
         except Exception as e:
             self.logger.error(f"Error critico inicializando subsistema de vision: {e}")
 
-        
     def detect_objects(self, image_path: str) -> List[Dict[str, Any]]:
         """
         Analiza una imagen y retorna los objetos detectados con su ubicacion
@@ -93,7 +103,6 @@ class HardwareAgent:
         
         return self.vision.train(data_path=data_path, attempts=10)
 
-
     def load_trained_model(self) -> bool:
         """
         Intenta cargar un modelo pre-entrenado desde el disco.
@@ -107,7 +116,7 @@ class HardwareAgent:
             return False
         
     # =========================================================================
-    # FUTURAS EXTENSIONES (Placeholders)
+    # SISTEMA DE AUDIO
     # =========================================================================
 
     def listen_command(self) -> str:
@@ -119,10 +128,44 @@ class HardwareAgent:
         # return self.voice.listen()
         pass
 
-    def estimate_box_distribution(self, detected_objects: List[str]) -> Dict[str, float]:
+    
+    # =========================================================================
+    # SISTEMA DE ESTIMACION BAYESIANA
+    # =========================================================================
+
+    def process_sample_for_estimation(self, image_path: str) -> Dict[str, Any]:
         """
-        (Futuro) Calcula la probabilidad Bayesiana de la caja de origen
-        basada en la lista de objetos detectados.
+        Método principal llamado por el botón 'Analizar Muestra' de la UI.
         """
-        # return self.bayes.predict(detected_objects)
-        pass
+        # 1. Realizar Inferencia Visual (Detectar piezas)
+        # Esto retorna la lista: [{'label': 'tuercas', 'bbox':...}, ...]
+        detections = self.detect_objects(image_path)
+        
+        # Estructura de respuesta base para la UI
+        response = {
+            "detections": detections, # Para pintar bboxes en el canvas
+            "count_in_image": len(detections),
+            "estimation_result": None
+        }
+
+        if not detections:
+            return response
+
+        # 2. Convertir lista de diccionarios a conteos simples
+        # Ej: ['tuercas', 'tuercas', 'clavos'] -> {'tuercas': 2, 'clavos': 1}
+        labels = [d['label'] for d in detections]
+        counts = dict(Counter(labels))
+        
+        # 3. Actualizar el Estimador Bayesiano con este lote
+        self.box_estimator.update(counts)
+        
+        # 4. Obtener el estado actual de la predicción
+        prediction = self.box_estimator.get_prediction()
+        response["estimation_result"] = prediction
+        
+        return response
+
+    def reset_estimation(self):
+        """Llamado por el botón 'Reiniciar Lote'"""
+        self.box_estimator.reset()
+        self.logger.info("Estimación reiniciada. Probabilidades restablecidas.")
