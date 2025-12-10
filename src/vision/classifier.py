@@ -66,28 +66,89 @@ class ImageClassifier:
         Retorna una lista de diccionarios con toda la info necesaria para la UI.
         """
         if not self.is_ready:
+            self.logger.error("Intento de prediccion con modelo no entrenado.")
             raise RuntimeError("El modelo no está entrenado.")
 
-        # 1. Ejecutar Pipeline (Obtener Features y BBoxes)
-        # Pasamos label=None porque es inferencia
-        features_list, _ = self._pipeline_process([(image_path, None)])
+        if not os.path.exists(image_path):
+            self.logger.error(f"Imagen no encontrada: {image_path}")
+            return []
         
-        if not features_list:
+        # Carga con OpenCV
+        image = cv2.imread(image_path)
+        if image is None:
+            self.logger.error(f"Error de lectura (cv2) en: {image_path}")
+            return []
+        
+        # Preprocesamiento + Segmentacion
+        try:
+            processed_img = self.img_prep.process(image)
+            seg_res = self.segmentator.process(processed_img)
+        except Exception as e:
+            self.logger.error(f"Fallo en pipeline de preprocesamiento/segmentacion: {e}")
+            return []
+        
+        if seg_res['total_objects'] == 0:
+            self.logger.info(f"Ningún objeto detectado en {os.path.basename(image_path)}")
             return []
 
-        # 2. Preprocesamiento de Datos (Normalización + Pesos)
-        X = self.data_prep.transform(features_list, weights=self.feature_weights)
+        # Extracción de Features
+        features_list = self.feature_extractor.extract_features(
+            seg_res['bounding_boxes'],
+            seg_res['masks']
+        )
+
+        # Preprocesamiento de Datos (Normalización + Pesos)
+        try:
+            X = self.data_prep.transform(
+                features_list,
+                weights=self.feature_weights
+            )
+        except Exception as e:
+            self.logger.critical(f"DataPreprocessor no ajustado: {e}")
+            return []
         
-        # 3. Inferencia (K-Means)
+        # Inferencia (K-Means)
         cluster_ids = self.model.predict(X)
         
-        # 4. Construcción de Respuesta
+        # Construcción de Respuesta
         results = []
+        filename = os.path.basename(image_path)
+        
+        self.logger.info(f"--- 🔍 INFERENCIA: {filename} ({len(cluster_ids)} objetos) ---")
+        
         for i, cid in enumerate(cluster_ids):
             label = self.cluster_mapping.get(cid, "desconocido")
+            raw_feats = features_list[i]
             
+            # --- LOGS DE DEBUG (La "Radiografía") ---
+            # Solo se verán si configuras logging.setLevel(logging.DEBUG)
+            debug_msg = [f"\n   OBJETO #{i} -> Predicción: [{label.upper()}] (Cluster {cid})"]
+            
+            # Análisis específico según tipo
+            if raw_feats.get('hole_confidence', 0) > 0.5:
+                # Caso Tuerca/Arandela
+                c_ratio = raw_feats.get('circle_ratio', 0)
+                rad_var = raw_feats.get('radius_variance', 0)
+                debug_msg.append(f"     ├─ ⭕ Circle Ratio: {c_ratio:.4f} (Arandela > 0.90 | Tuerca < 0.88)")
+                debug_msg.append(f"     ├─ 📏 Radius Var:   {rad_var:.4f} (Arandela ~ 0.02 | Tuerca > 0.05)")
+                
+                # Alertas de ambigüedad
+                if label == 'arandelas' and c_ratio < 0.90:
+                    debug_msg.append("     ⚠️  SOSPECHOSO: Clasificado Arandela pero es poco circular.")
+                if label == 'tuercas' and c_ratio > 0.90:
+                    debug_msg.append("     ⚠️  SOSPECHOSO: Clasificado Tuerca pero es muy circular.")
+            else:
+                # Caso Clavo/Tornillo
+                asp_ratio = raw_feats.get('aspect_ratio', 0)
+                solidity = raw_feats.get('solidity', 0)
+                debug_msg.append(f"     ├─ 📏 Aspect Ratio: {asp_ratio:.4f} (Clavo > 15 | Tornillo ~3-8)")
+                debug_msg.append(f"     ├─ ⬛ Solidity:     {solidity:.4f}")
+            
+            self.logger.debug("\n".join(debug_msg))
+            # ----------------------------------------
+
+
             # Recuperamos el bbox que guardamos en el diccionario de features
-            # (FeatureExtractor lo guarda bajo la key 'bbox')
             bbox = features_list[i].get('bbox')
             
             results.append({
@@ -173,21 +234,25 @@ class ImageClassifier:
         REQUIRED_CLASSES = {"arandelas", "clavos", "tornillos", "tuercas"}
 
         for i in range(1, attempts + 1):
-            # 1. División de datos
+            self.logger.debug(f"--- Ronda {i}/{attempts} ---")
+
+            # Carga y División de datos
             train_set, val_set = self.load_and_split_data(data_path, split_ratio=0.8)
             
-            # 2. Procesamiento
+            # Pipeline de entrenamiento Procesamiento
             train_features, train_labels = self._pipeline_process(train_set)
-            if not train_features: continue
+            if not train_features:
+                self.logger.warning("Ronda {i}: No se extrajeron features de entrenamiento.")
+                continue
 
             target_cols = self.feature_extractor.get_recommended_features()
             
             # Instancias temporales
             temp_data_prep = DataPreprocessor() 
-            # Aumentamos n_init a 100 para obligar a K-Means a probar muchas semillas
+            # n_init alto para obligar a K-Means a probar muchas semillas
             temp_model = KMeansModel(n_clusters=4, n_init=50, max_iters=500) 
             
-            # 3. Fit
+            # Fit
             X_train = temp_data_prep.fit_transform(
                 train_features,
                 target_features=target_cols,
@@ -196,44 +261,62 @@ class ImageClassifier:
             
             temp_model.fit(X_train)
             
-            # 4. Mapeo
+            # Mapeo de Clusters a Etiquetas
             predicted_clusters = temp_model.predict(X_train)
             temp_mapping = {}
-            found_classes = set() # Rasteamos qué clases encontró este modelo
+            found_classes = set()
             
             for k in range(temp_model.n_clusters):
+                # Indices de los datos que cayeron en el cluster k
                 indices = [idx for idx, x in enumerate(predicted_clusters) if x == k]
                 if indices:
+                    # Etiquetas reales de esos datos
                     labels = [train_labels[idx] for idx in indices]
+                    # Votacion mayoritaria
                     most_common = Counter(labels).most_common(1)[0][0]
                     temp_mapping[k] = most_common
                     found_classes.add(most_common)
                 else:
                     temp_mapping[k] = "desconocido"
             
-            # --- CHECK DE DIVERSIDAD (NUEVO) ---
-            # Si el modelo encontró menos de 4 clases (ej: duplicó arandelas y olvidó tuercas),
-            # lo penalizamos severamente o lo descartamos.
+            # Filtro de Calidad: Diversidad
             missing_classes = REQUIRED_CLASSES - found_classes
             if missing_classes:
-                print(f"   ⚠️ Round {i} descartado: No encontró {missing_classes}")
+                self.logger.warning(f"Ronda {i} descartada. Clases no encontradas {missing_classes}")
                 continue # Saltamos directamente al siguiente intento
             
-            # 5. Validación
+            # Validación
             val_features, val_labels = self._pipeline_process(val_set)
             if not val_features: continue
             
+            # Transformamos validacion
             X_val = temp_data_prep.transform(val_features, weights=current_weights)
             predictions = temp_model.predict(X_val)
             
             hits = 0
+            errors = []
+
             for idx, cid in enumerate(predictions):
-                pred_lbl = temp_mapping.get(cid, "desc")
-                if pred_lbl == val_labels[idx]: hits += 1
+                pred_lbl = temp_mapping.get(cid, "desconocido")
+                real_lbl = val_labels[idx]
+
+                if pred_lbl == real_lbl:
+                    hits += 1
+                else:
+                    # Guardamos el error para reporte
+                    errors.append(f"   [Esperado: {real_lbl.upper()}] -> [Predijo: {pred_lbl.upper()}]")
             
             current_accuracy = hits / len(predictions)
             
-            print(f"   ROUND {i}: Precisión {current_accuracy:.2%}")
+            self.logger.info(f" Ronda {i}: Precisión {current_accuracy:.2%}")
+
+            # Reporte de Errores
+            if errors:
+                self.logger.info(f"   ❌ Fallos en Validación ({len(errors)}):")
+                for err in errors:
+                    self.logger.info(err)
+            else:
+                self.logger.info("   ✅ Validación perfecta (0 errores).")
             
             # 6. Selección del Campeón
             if current_accuracy > best_accuracy:
@@ -245,9 +328,10 @@ class ImageClassifier:
                 self.is_ready = True
                 
                 self.save_model()
-                print(f"   ✨ ¡Nuevo Campeón! ({best_accuracy:.2%}) Guardado.")
+                self.logger.info(f"✨ ¡Nuevo Campeón! ({best_accuracy:.2%}) Guardado.")
                 
                 if best_accuracy > 0.98:
+                    self.logger.info("🏆 Precisión sobresaliente alcanzada, finalizando torneo.")
                     break
         
         # Restauración final

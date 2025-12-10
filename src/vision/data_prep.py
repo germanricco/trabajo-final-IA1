@@ -17,13 +17,12 @@ class DataPreprocessor:
         if not features_list:
             raise ValueError("Lista de características vacía.")
 
-        # Si no nos dicen que usar, usamos todas las disponibles
+        # Si no nos dicen que features usar, usamos todas las disponibles
         if target_features is None:
             self.feature_names_order_ = list(features_list[0].keys())
         else:
             self.feature_names_order_ = target_features
         
-
         X = self._to_matrix(features_list)
         
         self.means_ = np.mean(X, axis=0)
@@ -69,14 +68,18 @@ class DataPreprocessor:
         return self.transform(features_list, weights)
 
     def _to_matrix(self, features_list: List[Dict]) -> np.ndarray:
-        """Convierte lista de dicts a matriz numpy respetando el orden."""
+        """
+        Convierte lista de dicts a matriz numpy respetando el orden.
+        """
         matrix = []
-        for f in features_list:
-            # Solo extraemos las claves que definimos en el fit
-            # Si una clave falta, ponemos 0.0 por seguridad
-            row = [float(f.get(name, 0)) for name in self.feature_names_order_]
+        for feat_dict in features_list:
+            row = []
+            for name in self.feature_names_order_:
+                # Extraemos valor por nombre. Si no existe, usamos 0.0
+                val = feat_dict.get(name, 0.0)
+                row.append(float(val))
             matrix.append(row)
-        return np.array(matrix)
+        return np.array(matrix, dtype=np.float32)
 
     def save(self, filepath):
         with open(filepath, 'wb') as f:
