@@ -170,7 +170,7 @@ class Segmentator:
             else:
                 # Estrategia Agresiva. Arreglar Tornillos
                 min_dim = min(w, h)
-                k_size = int(min_dim * 0.15)    # kernel_size = 15% de la menor dimensión
+                k_size = int(min_dim * 0.20)    # kernel_size = 20% de la menor dimensión
                 # Aseguramos que sea impar
                 if k_size % 2 == 0: k_size += 1
                 k_size = max(5, k_size) # Mínimo 5px

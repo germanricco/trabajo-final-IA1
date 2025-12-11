@@ -146,7 +146,7 @@ class App:
             return
             
         self.status_footer.set_text("🧠 Entrenando... (No cierre la ventana)")
-        self.root.config(cursor="wait") # Poner cursor de reloj
+        self.root.config(cursor="watch") # Poner cursor de reloj
         
 
         def _train_thread():

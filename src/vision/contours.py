@@ -76,6 +76,8 @@ class GeometricProperties:
     aspect_ratio: float
     circularity: float
     compactness: float
+    rectangularity: float
+    roughness: float
     solidity: float
     extent: float
     hull_area: float
@@ -121,7 +123,7 @@ class ContourManager:
             return self._properties
         
         try:
-            # 1. Encontrar contornos externos e internos
+            # Encontrar contornos
             external_contour, hole_candidate = self._find_contours_hierarchical()
             
             # Valida si hay al menos un contorno externo
@@ -129,34 +131,41 @@ class ContourManager:
                 self.logger.warning("No se encontraron contornos externos en la mascara.")
                 return None
             
-            # 2. Propiedades Básicas
+            # Area y Perimetro de Contorno Externo
             area = float(cv2.contourArea(external_contour))
             if area == 0: return None
             perimeter = float(cv2.arcLength(external_contour, True))
             
-            # 3. Convex Hull y Solidity
+            # Convex Hull, Solidez y Rugosidad
             convex_hull = cv2.convexHull(external_contour)
             hull_area = float(cv2.contourArea(convex_hull))
+            hull_perimeter = float(cv2.arcLength(convex_hull, True))
+
             solidity = float(area / hull_area) if hull_area > 0 else 0.0
-            
-            # 4. Rectangulo rotado, Aspect Ratio y Extent
+            roughness = float(hull_perimeter / perimeter) if perimeter > 0 else 0.0
+
+            # Rectangulo rotado
             min_area_rect = cv2.minAreaRect(external_contour)
             (center_x, center_y), (rw, rh), angle = min_area_rect
 
             dim_max = max(rw, rh)
             dim_min = min(rw, rh)
-
-            # Aspect Ratio siempre >= 1.0 para consistencia
+            # Aspect Ratio
             aspect_ratio = float(dim_max / dim_min) if dim_min > 0 else 0.0
 
             rotated_area = rw * rh
-            extent = float(area / rotated_area) if rotated_area > 0 else 0.0
-            
-            # 5. Circularidad y Compacidad
+            rectangularity = float(area / rotated_area) if rotated_area > 0 else 0.0
+
+            # Extent
+            x, y, w, h = cv2.boundingRect(external_contour)
+            rect_area = w * h
+            extent = float(area / rect_area) if rect_area > 0 else 0.0
+
+            # Circularidad y Compacidad
             circularity = float((4 * np.pi * area) / (perimeter ** 2)) if perimeter > 0 else 0.0
             compactness = float((perimeter ** 2) / area) if area > 0 else 0.0
             
-            # 6. Momentos de Hu
+            # Momentos de Hu 
             M = cv2.moments(external_contour)
             hu_raw = cv2.HuMoments(M).flatten()
             hu_moments = self._normalize_hu_moments(hu_raw)
@@ -169,15 +178,15 @@ class ContourManager:
                 x, y, bw, bh = cv2.boundingRect(external_contour)
                 cx, cy = x + bw // 2, y + bh // 2
             
-            # 7. Deteccion de Agujeros (Internal Contours)
+            # Deteccion de Agujeros
             has_structural_hole, hole_confidence = self._classify_structural_hole(hole_candidate)
             
-            # 8. Circle Ratio
+            # Circle Ratio
             (_, _), radius = cv2.minEnclosingCircle(external_contour)
             circle_area = np.pi * (radius ** 2)
             circle_ratio = float(area / circle_area) if circle_area > 0 else 0.0
 
-            # 9. Radius Variance
+            # Radius Variance
             pts = external_contour.reshape(-1, 2)
             centroid = np.array([cx, cy])
             # Distancia de cada punto del borde (array de N longitudes)
@@ -187,15 +196,17 @@ class ContourManager:
             std_dist = np.std(distances)
             radius_variance = float(std_dist / mean_dist) if mean_dist > 0 else 0.0
 
-            # 10. Num Vertices (Aproximacion Poligonal)
-            epsilon = 0.020 * perimeter 
+            # Num Vertices (Aproximacion Poligonal)
+            epsilon = 0.015 * perimeter 
             approx = cv2.approxPolyDP(external_contour, epsilon, True)
             num_vertices = float(len(approx))
 
+            # Hole Area Ratio
             if hole_candidate:
                 hole_area_ratio = hole_candidate.area_ratio
             else:
                 hole_area_ratio = 0.0
+            
             # Almacenar todas las propiedades calculadas
             self._properties = GeometricProperties(
                 area=area,
@@ -207,6 +218,8 @@ class ContourManager:
                 circularity=circularity,
                 compactness=compactness,
                 solidity=solidity,
+                rectangularity=rectangularity,
+                roughness=roughness,
                 extent=extent,
                 hu_moments=hu_moments,
                 has_structural_hole=has_structural_hole,
@@ -303,6 +316,7 @@ class ContourManager:
         
         return external_contour, None
     
+
     def _normalize_hu_moments(self, hu_moments: np.ndarray) -> np.ndarray:
         """
         Normaliza momentos de Hu usando transformación logarítmica.
@@ -332,6 +346,7 @@ class ContourManager:
         
         return score
     
+
     def _classify_structural_hole(self, hole_candidate: Optional[InternalContourCandidate]) -> Tuple[bool, float]:
         """
         Decisión final basada en el candidato ganador.

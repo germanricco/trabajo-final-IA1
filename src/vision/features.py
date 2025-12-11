@@ -13,8 +13,6 @@ class FeatureExtractor:
         self.logger = logging.getLogger(__name__)
         
         # Definimos explícitamente qué características usaremos para el clustering
-        # El orden aquí es importante si no usaras DataPreprocessor, pero 
-        # con él, nos aseguramos consistencia por nombres.
         self.CLUSTERING_FEATURES = [
             'aspect_ratio',
             'solidity', 
@@ -65,20 +63,28 @@ class FeatureExtractor:
         hu = p.hu_moments if hasattr(p, 'hu_moments') and len(p.hu_moments) >= 3 else [0.0]*7
 
         return {
-            # Metadatos
+            # --- METADATOS ---
             'id': obj_id,
             
-            # --- FEATURES DE CLUSTERING (PRIORITARIAS) ---
-            'aspect_ratio': float(p.aspect_ratio),
-            'extent': float(p.extent),
-            'solidity': float(p.solidity),
-            'circularity': float(p.circularity),
-            'hole_confidence': float(p.hole_confidence),
-            'circle_ratio': float(p.circle_ratio),
-            'radius_variance': float(p.radius_variance),
-            'num_vertices': float(p.num_vertices),
+            # --- 1. FEATURES DE CLUSTERING (THE BIG 5) ---
+            # Estas son las únicas que el K-Means mirará (si configuramos bien el FeatureExtractor)
+            'hole_confidence': float(p.hole_confidence),  # Tuerca/Arandela vs Resto
+            'aspect_ratio': float(p.aspect_ratio),        # Largo vs Corto
+            'roughness': float(p.roughness),              # Rosca vs Liso -> Tornillo vs Clavo
+            'radius_variance': float(p.radius_variance),  # Hexágono vs Círculo -> Tuerca vs Arandela
             
-            # --- FEATURES INFORMATIVAS (DEBUG/UI) ---
+            
+            # --- 2. FEATURES INFORMATIVAS (DEBUG / LEGACY) ---
+            # Se guardan para visualización en tablas o análisis futuro, 
+            # pero no dirigirán la clasificación principal.
+            'rectangularity': float(p.rectangularity), 
+            'solidity': float(p.solidity),          # Reemplazado por roughness
+            'circle_ratio': float(p.circle_ratio),  # Reemplazado por radius_variance
+            'extent': float(p.extent),              # Similar a rectangularity pero sin rotación
+            'circularity': float(p.circularity),    # Muy sensible al ruido
+            'num_vertices': float(p.num_vertices),  # Inestable
+            
+            # Datos físicos crudos
             'area': float(p.area),
             'perimeter': float(p.perimeter),
             'compactness': float(p.compactness),
