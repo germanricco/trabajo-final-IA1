@@ -25,15 +25,15 @@ class ImageClassifier:
         self.img_prep = ImagePreprocessor(target_size = (960,1280),
                                 gamma = 1.7,
                                 d_bFilter = 8,
-                                binarization_block_size = 29,
-                                binarization_C = -5,
+                                binarization_block_size = 27,
+                                binarization_C = -4,
                                 open_kernel_size = (3, 3),
                                 close_kernel_size = (3, 3),
                                 clear_border_margin = 5)
     
         self.segmentator = Segmentator(
-            min_area = 40,
-            merge_distance = 10
+            min_area = 100,
+            merge_distance = 15
         )
 
         self.feature_extractor = FeatureExtractor()
@@ -156,7 +156,8 @@ class ImageClassifier:
                 "bbox": bbox,
                 "cluster_id": int(cid)
             })
-            
+        
+        print(f"Resultados de clasificación para {filename}: {results}")
         return results
 
     def _pipeline_process(self, image_paths_with_labels):

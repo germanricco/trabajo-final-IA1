@@ -19,6 +19,7 @@ class KMeansModel:
             * n_clusters (K): Número de grupos a formar (ej: 4 para tornillos, clavos, etc).
             * max_iters: Límite de seguridad para evitar bucles infinitos.
             * tol: Tolerancia de convergencia. Si los centroides se mueven menos que esto, paramos.
+            * n_init: Número de veces que se ejecuta el algoritmo con diferentes centroides iniciales.
         """
         self.n_clusters = n_clusters
         self.max_iters = max_iters
@@ -142,9 +143,6 @@ class KMeansModel:
 
     def _calculate_distances_with_centroids(self, X: np.ndarray, centroids: np.ndarray) -> np.ndarray:
         """
-        Refactorizamos para poder pasar 'centroids' como argumento,
-        así sirve tanto para 'self.centroids' como para 'current_centroids' temporalmente.
-
         Calcula la distancia Euclidiana de cada punto a cada centroide.
         
         Args:
