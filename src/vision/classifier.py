@@ -435,7 +435,7 @@ class ImageClassifier:
                 self.cluster_mapping[k] = "desconocido"
 
     def save_model(self):
-        with open(os.path.join(self.models_dir, "vision_system.pkl"), "wb") as f:
+        with open(os.path.join(self.models_dir, "vision_model.pkl"), "wb") as f:
             pickle.dump({
                 "model": self.model,
                 "mapping": self.cluster_mapping,

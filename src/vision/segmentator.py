@@ -27,16 +27,26 @@ class Segmentator:
     def process(self, binary_image: np.ndarray) -> Dict:
         """
         Procesa una imagen binaria para encontrar y segmentar contornos.
-        Retorna bounding boxes y mascaras procesadas.
+
+        Args:
+            * binary_image (np.ndarray): Imagen binaria de entrada.
+
+        Returns:
+            * Dict: 
+            {
+                "bounding_boxes": List[Tuple[int, int, int, int]],
+                "masks": List[np.ndarray],
+                "total_objects": int
+            }
         """
 
-        # 1. Encontrar contornos externos.
+        # Encontrar contornos externos.
         contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
             return {"bounding_boxes": [], "masks": [], "total_objects": 0}
         
-        # 2. Filtrado por Area Absoluta y Aspect Ratio extremo
+        # Filtrado por Area Absoluta y Aspect Ratio extremo
         raw_contours = []
         raw_bboxes = []
 
@@ -56,10 +66,10 @@ class Segmentator:
             raw_contours.append(cnt)
             raw_bboxes.append((x, y, w, h))
 
-        # 3. Fusion de partes rotas
+        # Fusion de partes rotas
         merged_bboxes = self._merge_broken_parts(raw_bboxes)
 
-        # 4. Extraer mascaras (soldadura + limpieza)
+        # Extraer mascaras (soldadura + limpieza)
         masks = self._extract_masks_from_bboxes(binary_image, merged_bboxes)
 
         return {
@@ -72,6 +82,12 @@ class Segmentator:
     def _merge_broken_parts(self, bboxes: List[List[int]]) -> List[List[int]]:
         """
         Algoritmo iterativo para fusionar rectángulos cercanos.
+
+        Args:
+            * bboxes (List[List[int]]): Lista de bounding boxes [x, y, w, h].
+
+        Returns:
+            * List[List[int]]: Lista de bounding boxes fusionados [x, y, w, h].
         """
         if not bboxes: return []
         
@@ -132,15 +148,20 @@ class Segmentator:
                                    binary_image: np.ndarray,
                                    bounding_boxes: List[Tuple]) -> List[np.ndarray]:
         """
-        Extrae máscaras individuales limpias.
-        Aplica "Closing  Adaptativo" para corregir objetos rotos.
+        Extrae máscaras individuales limpias. Aplica "Closing  Adaptativo" para corregir objetos rotos.
+
+        Args:
+            * binary_image (np.ndarray): Imagen binaria de entrada.
+            * bounding_boxes (List[Tuple]): Lista de bounding boxes (x, y, w, h).
+
+        Returns:
+            * List[np.ndarray]: Lista de máscaras binarias individuales.
         """
 
         masks = []
         h_img, w_img = binary_image.shape[:2]
         
         for bbox in bounding_boxes:
-            # Crear una mascara del contorno
             x, y, w, h = bbox
 
             # Padding (seguridad para el ROI)
@@ -151,19 +172,21 @@ class Segmentator:
             y2 = min(h_img, y + h + pad)
             # ROI (Region of Interest)
             roi_w, roi_h = x2 - x1, y2 - y1
-            # Si el ROI es inválido (0 pixels), saltamos
+
+            # Verificar si el ROI es inválido (0 pixels)
             if roi_w <= 0 or roi_h <= 0: continue
 
-            # 1. Recorte del ROI original (contiene los fragmentos rotos)
+            # Recorte del ROI original (contiene los fragmentos rotos)
             binary_roi = binary_image[y1:y2, x1:x2]
 
-            # 1.5 Antes de soldar realizar una limpieza previa
+            # Antes de soldar realizar una limpieza previa
             clean_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
             cleaned_roi = cv2.morphologyEx(binary_roi, cv2.MORPH_OPEN, clean_kernel)
 
-            # 1.75 Antes de soldar realizar distinguir entre tuercas/arandelas y clavos/tornillos
+            # Antes de soldar realizar distinguir entre tuercas/arandelas y clavos/tornillos
             aspect_ratio = float(w) / h if h > 0 else 1.0
             is_compact = 0.6 < aspect_ratio < 1.6
+
             if is_compact:
                 # Estrategia Conservadora. No soldar
                 object_roi = cleaned_roi
@@ -174,17 +197,15 @@ class Segmentator:
                 # Aseguramos que sea impar
                 if k_size % 2 == 0: k_size += 1
                 k_size = max(5, k_size) # Mínimo 5px
-                # 2. Soldadura
+                # Soldadura
                 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
                 # Aplicamos Closing sobre los datos crudos del ROI
                 object_roi = cv2.morphologyEx(cleaned_roi, cv2.MORPH_CLOSE, kernel, iterations=2)
             
-            
-            
-            # 3. Limpieza de ruido externo
+            # Limpieza de ruido externo
             object_roi = cv2.morphologyEx(object_roi, cv2.MORPH_OPEN, clean_kernel)
             
-            # 4. Seleccionar el objeto más grande del ROI
+            # Seleccionar el objeto más grande del ROI
             cnts_roi, _ = cv2.findContours(object_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if cnts_roi:
                 main_cnt = max(cnts_roi, key=cv2.contourArea)
@@ -200,23 +221,16 @@ class Segmentator:
                 bbox_mask = np.zeros_like(object_roi)
                 cv2.rectangle(bbox_mask, (rel_x, rel_y), (rel_x + w, rel_y + h), 255, -1)
                 
-                # C. COMBINACIÓN FINAL (LA CORRECCIÓN)
-                # Tomamos la imagen procesada (object_roi) que TIENE EL AGUJERO.
-                # Usamos solid_mold para borrar el ruido externo (islas flotantes).
-                # Usamos bbox_mask para cortar picos que se salgan del cuadro.
-                
-                # Paso 1: Filtrar ruido externo (quedarse solo con lo que está dentro del contorno principal)
-                # Al hacer AND con solid_mold, borramos lo de afuera, pero mantenemos lo de adentro.
-                # PERO object_roi tiene el agujero negro (0), así que 0 AND 255 = 0. ¡El agujero sobrevive!
+                # Filtrar
                 filtered_roi = cv2.bitwise_and(object_roi, solid_mold)
                 
-                # Paso 2: Recortar al BBox
+                # Recortar al BBox
                 final_object_roi = cv2.bitwise_and(filtered_roi, bbox_mask)
 
             else:
                 final_object_roi = np.zeros_like(object_roi)
             
-            # 5. Reconstrucción
+            # Reconstrucción
             full_mask = np.zeros((h_img, w_img), dtype=np.uint8)
             full_mask[y1:y2, x1:x2] = final_object_roi
             masks.append(full_mask)

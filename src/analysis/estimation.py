@@ -3,7 +3,7 @@ from typing import Dict, List
 
 class BoxEstimator:
     def __init__(self):
-        # 1. Definimos los perfiles de las cajas (Hipótesis)
+        # Definimos los perfiles de las cajas (Hipótesis)
         # Convertimos las cantidades absolutas a probabilidades (normalizamos).
         # Agregamos un epsilon (1e-6) para evitar log(0) si la visión falla y ve algo que "no debería" estar.
         
@@ -34,9 +34,9 @@ class BoxEstimator:
             box_p = {}
             for item in self.classes:
                 # Probabilidad base: (Cantidad + epsilon) / Total
-                # Esto asegura que Box D tenga una probabilidad muy baja (pero no cero) de tener arandelas
+                # Asegura que Box D tenga una probabilidad muy baja (pero no cero) de tener arandelas o tuercas
                 p = (counts.get(item, 0) + epsilon) / (total_items + (epsilon * 4))
-                box_p[item] = np.log(p) # Trabajamos con Logaritmos para sumar en vez de multiplicar
+                box_p[item] = np.log(p)
             probs[box] = box_p
         return probs
 

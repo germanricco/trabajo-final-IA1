@@ -13,6 +13,13 @@ class DataPreprocessor:
     def fit(self, features_list: List[Dict], target_features: List[str] = None):
         """
         Aprende las estadísticas (media, desviación estándar) de las características especificadas en target_features.
+
+        Args:
+            * features_list (List[Dict]): Lista de diccionarios con las características.
+            * target_features (List[str], optional): Lista de nombres de características a usar. Si es None, usa todas las disponibles.
+
+        Returns:
+            * self
         """
         if not features_list:
             raise ValueError("Lista de características vacía.")
@@ -29,7 +36,6 @@ class DataPreprocessor:
         self.stds_ = np.std(X, axis=0)
         
         # Evitar división por cero: si std es 0, lo cambiamos a 1
-        # (significa que esa característica no varía y no aporta info, pero no debe romper el código)
         self.stds_[self.stds_ == 0] = 1.0
         
         self.is_fitted = True
@@ -39,8 +45,14 @@ class DataPreprocessor:
                   features_list: List[Dict],
                   weights: Dict[str, float] = None) -> np.ndarray:
         """
-        Normaliza nuevos datos usando las estadísticas aprendidas en fit.
-        Aplica ponderacion opcional
+        Normaliza nuevos datos usando las estadísticas aprendidas en fit. Aplica ponderacion opcional
+
+        Args:
+            * features_list (List[Dict]): Lista de diccionarios con las características.
+            * weights (Dict[str, float], optional): Diccionario con pesos por característica.
+
+        Returns:
+            * np.ndarray: Matriz normalizada de características.
         """
         if not self.is_fitted:
             raise RuntimeError("El preprocesador no ha sido entrenado (fit).")

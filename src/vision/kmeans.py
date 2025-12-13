@@ -26,8 +26,8 @@ class KMeansModel:
         self.tol = tol
         self.n_init = n_init
         
-        # Estado del modelo: Aquí guardaremos las coordenadas de los K centroides
-        # Forma esperada: (n_clusters, n_features) -> Ej: (4, 9)
+        # Estado del modelo
+        # Forma esperada: (n_clusters, n_features) -> Ej: (4, 5)
         self.centroids = None
         self.inertia_ = None  # Suma de distancias al cuadrado de puntos a sus centroides
         
@@ -38,8 +38,11 @@ class KMeansModel:
         Entrena el modelo buscando los centroides óptimos.
         
         Args:
-            X: Matriz de datos normalizados. Forma: (n_samples, n_features).
+            * X: Matriz de datos normalizados. Forma: (n_samples, n_features).
                Ej: (16 objetos, 9 características)
+
+        Returns:
+            * None
         """
         n_samples, n_features = X.shape
         
@@ -54,25 +57,23 @@ class KMeansModel:
         best_centroids = None
 
         for run in range(self.n_init):
-            # PASO 1: Inicialización
+            # Inicialización
             current_centroids = self._initialize_centroids(X)
 
             for i in range(self.max_iters):
                 # Guardamos copia para comparar luego cuánto se movieron
                 old_centroids = current_centroids.copy()
 
-                # Paso 2 - Asignacion usando centroides actuales
+                # Asignacion usando centroides actuales
                 distances = self._calculate_distances_with_centroids(X, current_centroids)
 
                 # Para cada punto, encontramos el índice del centroide más cercano (0, 1, 2 o 3)
                 labels = np.argmin(distances, axis=1)
 
-                # PASO 3: Actualización (Maximization Step)
-                # Movemos los centroides al promedio de sus puntos asignados
+                # Actualización (Maximization Step)
                 current_centroids = self._update_centroids_logic(X, labels, current_centroids)
 
-                # PASO 4: Chequeo de Convergencia
-                # Calculamos la distancia total que se movieron los centroides
+                # Chequeo de Convergencia
                 shift = np.linalg.norm(current_centroids - old_centroids)
 
                 # Log de progreso para ver cómo baja el movimiento
@@ -83,7 +84,7 @@ class KMeansModel:
                     self.logger.debug(f"✅ Convergencia alcanzada en iteración {i}. Movimiento: {shift:.6f}")
                     break
             
-            # --- Fin de la ejecución. Calculamos la nota (Inercia) ---
+            # Calculamos la Inercia
             current_inertia = self._calculate_inertia(X, current_centroids)
 
             # Si esta ejecución es mejor que la mejor que teníamos, la guardamos
@@ -100,7 +101,12 @@ class KMeansModel:
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
         Inferencia: Asigna nuevos datos a los clusters ya aprendidos.
-        No modifica los centroides.
+
+        Args:
+            * X: Matriz de datos normalizados. Forma: (n_samples, n_features).
+        
+        Returns:
+            * np.ndarray: Índices de clusters asignados a cada punto. (n_samples,)
         """
         if self.centroids is None:
             raise RuntimeError("El modelo no está entrenado. Ejecuta fit() primero.")
@@ -154,12 +160,6 @@ class KMeansModel:
         """
 
         # Calculo la distancia entre cada data-point X y cada centroide (x-c)
-        # Cada elemento de matriz ahora es (x - c) para cada combinación de punto y centroide
-        #! Broadcasting
-        # X shape: (N, Features)
-        # X[:,np.newaxis] -> (N, 1, Features)
-        # self.centroids -> (K, Features)
-        # diff_matrix -> (N, K, Features)
         diff_matrix = X[:, np.newaxis] - centroids
 
         distances = np.sqrt(np.sum(diff_matrix ** 2, axis=2))
@@ -172,6 +172,14 @@ class KMeansModel:
                                 current_centroids: np.ndarray) -> np.ndarray:
         """
         Recalcula la posición de los centroides como el promedio de los puntos.
+
+        Args:
+            * X: Matriz de datos. (N, Features)
+            * labels: Índices de clusters asignados a cada punto. (N,)
+            * current_centroids: Centroides actuales. (K, Features)
+        
+        Returns:
+            * new_centroids: Centroides actualizados. (K, Features)
         """
         new_centroids = np.zeros_like(current_centroids)
         

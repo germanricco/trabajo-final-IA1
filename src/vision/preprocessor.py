@@ -43,6 +43,15 @@ class ImagePreprocessor:
 
 
     def process(self, image: np.ndarray) -> np.ndarray:
+        """
+        Aplica el pipeline de preprocesamiento a una imagen.
+
+        Args:
+            * image (np.ndarray): Imagen de entrada en formato BGR o escala de grises.
+
+        Returns:
+            * np.ndarray: Imagen preprocesada (binarizada).
+        """
         # Escala de Grises
         gray_image = self._convert_to_grayscale(image)
         self.logger.debug("Imagen convertida a escala de grises.")
@@ -85,7 +94,6 @@ class ImagePreprocessor:
         )
         self.logger.debug("Bordes limpiados.")
 
-        # Retornar
         return final_image
 
 
@@ -94,10 +102,10 @@ class ImagePreprocessor:
         Convierte la imagen a escala de grises si es necesario.
         
         Args:
-            image (np.ndarray): Imagen de entrada en formato BGR o ya en escala de grises.
+            * image (np.ndarray): Imagen de entrada en formato BGR o ya en escala de grises.
         
         Returns:
-            np.ndarray: Imagen en escala de grises.
+            * np.ndarray: Imagen en escala de grises.
 
         Raises:
             ValueError: Si la imagen no tiene 1 o 3 canales.
@@ -109,18 +117,22 @@ class ImagePreprocessor:
         
         # Convertir a escala de grises si es necesario
         if len(image.shape) == 2:
-            print("Imagen ya en escala de grises.")
+            self.logger.debug("Imagen ya en escala de grises.")
             return image
         
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
         return gray_image
     
 
     def _standardize_size(self, image: np.ndarray) -> np.ndarray:
         """
         Redimensiona la imagen manteniendo el Aspect Ratio (proporción).
-        Agrega bordes negros (padding) para llegar al target_size sin deformar.
+
+        Args:
+            * image (np.ndarray): Imagen de entrada.
+
+        Returns:
+            * tuple: (np.ndarray, tuple) Imagen redimensionada con padding y tupla de padding (top, bottom, left, right).
         """
         # Tomar width, height (target y original)
         target_w, target_h = self.target_size
@@ -141,7 +153,6 @@ class ImagePreprocessor:
         left, right = delta_w // 2, delta_w - (delta_w // 2)
         
         # Agregar bordes (Letterbox)
-        # BORDER_CONSTANT agrega color sólido (0 = negro)
         new_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, 
                                        cv2.BORDER_REPLICATE)
         
@@ -151,10 +162,14 @@ class ImagePreprocessor:
 
     def _apply_gamma(self, image: np.ndarray, gamma: float = 1.5) -> np.ndarray:
         """
-        Aumenta el contraste en las zonas oscuras (aplasta el ruido)
-        sin saturar las zonas claras.
-        gamma > 1: Oscurece medios tonos (quita ruido de fondo).
-        gamma < 1: Aclara sombras.
+        Aumenta el contraste en las zonas oscuras sin saturar las zonas claras.
+
+        Args:
+            * image (np.ndarray): Imagen de entrada.
+            * gamma (float): Valor de gamma. (>1 oscurece, <1 aclara).
+
+        Returns:
+            * np.ndarray: Imagen con corrección gamma aplicada.
         """
         invGamma = 1.0 / gamma
         table = np.array([((i / 255.0) ** invGamma) * 255
@@ -164,11 +179,14 @@ class ImagePreprocessor:
 
     def _apply_bilateral_filter(self, image: np.ndarray, d_bFilter: int = 2) -> np.ndarray:
         """
-        Reemplazo de GaussianBlur. Elimina ruido pero manteniendo los bordes.
+        Elimina ruido pero manteniendo los bordes.
+
+        Args:
+            * image (np.ndarray): Imagen de entrada.
+            * d_bFilter (int): Diametro del filtro bilateral.
         
-        * d: Diámetro del vecindario (5-9 está bien).
-        * sigmaColor: Cuánto se pueden mezclar colores (75 es estándar).
-        * sigmaSpace: Qué tan lejos se mezclan píxeles (75 es estándar).
+        Returns:
+            * np.ndarray: Imagen filtrada.
         """
         return cv2.bilateralFilter(image, d=d_bFilter, sigmaColor=100, sigmaSpace=100)
 
@@ -184,7 +202,7 @@ class ImagePreprocessor:
         Aplica binarización adaptativa (adaptiveThreshold) a una imagen en escala de grises.
 
         Args:
-            * image (np.ndarray): Imagen de entrada en escala de grises.
+            * blurred_image (np.ndarray): Imagen de entrada en escala de grises.
             * max_value (int): Valor máximo a asignar a los píxeles umbralizados (por defecto 255).
             * adaptive_method (int): Método adaptativo (cv2.ADAPTIVE_THRESH_MEAN_C o cv2.ADAPTIVE_THRESH_GAUSSIAN_C).
             * threshold_type (int): Tipo de umbral (cv2.THRESH_BINARY o cv2.THRESH_BINARY_INV).
@@ -192,7 +210,7 @@ class ImagePreprocessor:
             * C (int): Constante a restar de la media/gaussiana local.
 
         Returns:
-            np.ndarray: Imagen binarizada adaptativamente (dtype uint8).
+            * np.ndarray: Imagen binarizada adaptativamente (dtype uint8).
 
         Raises:
             ValueError: Si la imagen no está en escala de grises o block_size no es válido.
@@ -233,7 +251,7 @@ class ImagePreprocessor:
             * close_kernel_size (tuple): Tamaño del kernel para el cierre morfologico.
 
         Returns:
-            np.ndarray: Imagen binarizada limpia.
+            * np.ndarray: Imagen binarizada limpia.
         """
 
         # Definir Kernels
@@ -251,14 +269,18 @@ class ImagePreprocessor:
     
     def _mask_padding_artifacts(self, image: np.ndarray, padding: tuple, safety_margin: int = 5) -> np.ndarray:
         """
-        Pinta de negro estricto las zonas de padding, extendiéndose un poco 
-        hacia adentro (safety_margin) para borrar los artefactos de borde.
+        Pinta de negro estricto las zonas de padding, extendiéndose un poco hacia adentro (safety_margin).
+
+        Args:
+            * image (np.ndarray): Imagen de entrada.
+            * padding (tuple): Tamaños de padding (top, bottom, left, right).
+            * safety_margin (int): Margen de seguridad para evitar borde.
+
+        Returns:
+            * np.ndarray: Imagen con zonas de padding pintadas de negro.
         """
         top, bottom, left, right = padding
         h, w = image.shape
-        
-        # Pintamos de negro las barras laterales/superiores + un margen de seguridad
-        # para asegurar que borramos la línea blanca del threshold.
         
         if top > 0:
             image[:top + safety_margin, :] = 0
@@ -271,11 +293,17 @@ class ImagePreprocessor:
             
         return image
     
-    # PARA VISUALIZACION
     def scale_bbox_back(self, bbox_processed, original_shape):
         """
         Convierte un Bounding Box del espacio procesado (ej: 800x600 con padding)
         de vuelta al espacio de la imagen original (ej: 4000x3000).
+
+        Args:
+            * bbox_processed (tuple): Bounding Box en el espacio procesado.
+            * original_shape (tuple): Tamaños de la imagen original.
+
+        Returns:
+            * tuple: Bounding Box en el espacio de la imagen original.
         """
         x, y, w, h = bbox_processed
         h_orig, w_orig = original_shape[:2]
@@ -305,6 +333,13 @@ class ImagePreprocessor:
         """
         Devuelve la máscara al tamaño original, eliminando el padding (barras negras)
         antes de redimensionar para evitar deformaciones.
+
+        Args:
+            * processed_mask (np.ndarray): Máscara en el espacio procesado.
+            * original_shape (tuple): Tamaños de la imagen original.
+
+        Returns:
+            * np.ndarray: Máscara redimensionada al tamaño original.
         """
         h_orig, w_orig = original_shape[:2]
         target_w, target_h = self.target_size
@@ -326,11 +361,11 @@ class ImagePreprocessor:
         cropped_mask = processed_mask[pad_h : pad_h + new_h, pad_w : pad_w + new_w]
         
         # 4. REDIMENSIONAR al tamaño original
-        # Usamos INTER_NEAREST para mantener la máscara binaria (bordes duros, sin difuminar)
         if cropped_mask.size == 0:
             # Fallback por seguridad si el crop sale vacío
             return np.zeros((h_orig, w_orig), dtype=np.uint8)
-            
+        
+        # Usamos INTER_NEAREST para mantener la máscara binaria (bordes duros, sin difuminar)
         original_mask = cv2.resize(cropped_mask, (w_orig, h_orig), interpolation=cv2.INTER_NEAREST)
         
         return original_mask

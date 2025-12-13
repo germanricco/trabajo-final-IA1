@@ -5,7 +5,11 @@ import os
 
 # Importar arquitectura modular
 from src.core.agent import HardwareAgent
-from src.ui.panels import VisionPanel, ControlPanel, BayesianAnalysisPanel, StatusFooter, AudioFooter
+from src.ui.panels import VisionPanel
+from src.ui.panels import ControlPanel
+from src.ui.panels import BayesianAnalysisPanel
+from src.ui.panels import StatusFooter
+from src.ui.panels import AudioFooter
 
 class App:
     def __init__(self, root):
@@ -22,7 +26,7 @@ class App:
         # Backend: Instanciar Agente
         self.agent = HardwareAgent()
 
-        # Obtener referencia segura al preprocesador de imagenes
+        # Obtener referencia segura al preprocesador de imagenes (visualizacion)
         if self.agent.vision:
             shared_preprocessor = self.agent.vision.img_prep
         else:
@@ -31,35 +35,27 @@ class App:
 
         self.current_image_path = None
         
-        # --- FRONTEND: Layout Principal (grid) ---
-        # Fila 0: Contenido Principal (Se estira mucho)
-        self.root.rowconfigure(0, weight=1)
-        # Fila 1: Footer (Altura fija, no se estira verticalmente)
+        # FRONTEND: Layout Principal
+        self.root.rowconfigure(0, weight=1) 
         self.root.rowconfigure(1, weight=0)
-        
-        # Columna 0: Zona vision (3/4 espacio)
-        self.root.columnconfigure(0, weight=3) # Imagen
-        # Columna 1: Sidebar controles (1/4 espacio)
-        self.root.columnconfigure(1, weight=1) # Sidebar
+        self.root.columnconfigure(0, weight=3)  # Vision Panel
+        self.root.columnconfigure(1, weight=1)  # Control Panel
 
-        # ==========================================
-        #        COLUMNA 0 (IZQUIERDA)
-        # ==========================================
 
-        # PANEL DE VISION (arriba)
+        # ====== COLUMNA 0 (IZQUIERDA) ======
+
+        # Panel de Vision
         self.vision_container = tk.Frame(self.root, bg="#2c3e50")
         self.vision_container.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
 
         self.vision_panel = VisionPanel(self.vision_container, preprocessor=shared_preprocessor)
         self.vision_panel.pack(fill="both", expand=True)
 
-        # FOOTER DE ESTADO (Abajo)
+        # Footer de Estado
         self.status_footer = StatusFooter(self.root)
         self.status_footer.grid(row=1, column=0, sticky="ew", padx=1, pady=(0, 1))
 
-        # ==========================================
-        #        COLUMNA 1 (DERECHA)
-        # ==========================================
+        # ====== COLUMNA 1 (DERECHA) ======
 
         # Contenedor de Sidebar de Controles
         self.sidebar_container = tk.Frame(self.root, bg="#f0f0f0")
@@ -84,7 +80,10 @@ class App:
         self.audio_footer = AudioFooter(self.root, on_listen_click=self.listen_voice_command)
         self.audio_footer.grid(row=1, column=1, sticky="ew", padx=1, pady=(0, 1))
         
-        
+
+    # =========================================================================
+    # CLASIFICACIÓN DE IMÁGENES & BAYES
+    # =========================================================================
     def load_image(self):
         """Abre explorador de archivos."""
         file_path = filedialog.askopenfilename(
@@ -119,16 +118,15 @@ class App:
             messagebox.showinfo("Info", "La imagen parece estar vacía o los objetos no son reconocibles.")
             return
 
-        # 2. Dibujar cajas en la imagen
+        # Actualizar UI
         self.vision_panel.draw_detections(detections) # Pasamos la lista directa de diccionarios
         
-        # 3. Actualizar Gráficos y Estadísticas
         if estimation:
             self.stats_panel.update_view(estimation)
         
-        # 4. Feedback en barra de estado
+        # Feedback en barra de estado
         count = result.get('count_in_image', 0)
-        self.status_footer.set_text(f"✅ Análisis completado: {count} objetos añadidos.")
+        self.status_footer.set_text(f"✅ Análisis completado: {count} objetos.")
 
 
     def reset_batch(self):
@@ -161,42 +159,104 @@ class App:
 
     def _training_complete(self, accuracy):
         self.root.config(cursor="")
-        msg = f"Entrenamiento Exitoso.\nPrecisión del modelo: {accuracy:.2%}"
         self.status_footer.set_text(f"Modelo listo ({accuracy:.1%})")
-        messagebox.showinfo("Éxito", msg)
+        messagebox.showinfo("Éxito", f"Precisión del modelo: {accuracy:.2%}")
 
 
     def _training_error(self, error_msg):
         self.root.config(cursor="")
         self.status_footer.set_text("Error en entrenamiento")
-        messagebox.showerror("Error Crítico", f"Falló el entrenamiento:\n{error_msg}")
+        messagebox.showerror("Error Crítico", error_msg)
 
 
     def load_existing_model(self):
         """Carga modelo pre-entrenado."""
         if self.agent.load_trained_model():
             self.status_footer.set_text("📂 Modelo cargado desde disco.")
-            messagebox.showinfo("Carga Exitosa", "El sistema de visión está listo.")
+            messagebox.showinfo("Exito", "Modelo cargado correctamente.")
         else:
             self.status_footer.set_text("❌ Error cargando modelo.")
-            messagebox.showerror("Error", "No se encontró 'vision_system.pkl'.")
+            messagebox.showerror("Error", "No se encontró el archivo del modelo.")
 
+
+    # =========================================================================
+    # RECONOCIMIENTO DE VOZ (INTEGRACIÓN COMPLETA)
+    # =========================================================================
 
     def listen_voice_command(self):
         """
-        Placeholder para la futura lógica de audio.
+        Inicia el proceso de escucha en un hilo separado (para no congelar la UI).
         """
-        # Aquí luego llamaremos a self.agent.listen()
-        self.audio_footer.set_text("👂 Escuchando... (Próximamente)", is_active=True)
-        self.status_footer.set_text("🎤 Interacción de voz iniciada...")
+        # Feedback Visual Inmediato
+        self.audio_footer.set_text("👂 Escuchando... (Hable ahora)", is_active=True)
+        self.status_footer.set_text("🎤 Micrófono activo...")
+        self.root.config(cursor="watch")
         
-        # Simulamos delay de procesamiento
-        self.root.after(2000, lambda: self._on_voice_processed())
+        # Lanzar Hilo
+        threading.Thread(target=self._thread_voice_listener, daemon=True).start()
 
+    def _thread_voice_listener(self):
+        """Hilo secundario que espera al micrófono."""
+        # Llamada bloqueante al agente (2 segundos aprox)
+        command = self.agent.listen_command()
+        
+        # Volver al hilo principal
+        self.root.after(0, lambda: self._process_voice_result(command))
 
-    def _on_voice_processed(self):
-        self.audio_footer.set_text("Comando no reconocido", is_active=False)
-        self.status_footer.set_text("Listo")
+    def _process_voice_result(self, command):
+        """Se ejecuta en el hilo principal con el resultado."""
+        # Restaurar UI
+        self.root.config(cursor="")
+        self.audio_footer.set_text("Click para hablar", is_active=False)
+        
+        # Manejo de Errores
+        if "ERROR" in command:
+            self.status_footer.set_text("❌ Error de Audio")
+            messagebox.showwarning("Voz", "No se pudo reconocer el audio o hubo un error de hardware.")
+            return
+
+        if command == "UNCERTAIN":
+            self.status_footer.set_text("⚠️ Comando incierto")
+            return
+
+        # Éxito
+        self.status_footer.set_text(f"🗣️ Comando: {command.upper()}")
+        
+        # --- DISPATCHER DE COMANDOS ---
+        if command == "salir":
+            self._voice_action_exit()
+            
+        elif command == "contar":
+            self._voice_action_count()
+            
+        elif command == "proporcion":
+            self._voice_action_proportion()
+            
+        else:
+            self.status_footer.set_text(f"Comando '{command}' desconocido")
+
+    # --- ACCIONES ESPECÍFICAS DE VOZ ---
+
+    def _voice_action_exit(self):
+        if messagebox.askokcancel("Salir", "¿Confirmar salida por voz?"):
+            self.root.quit()
+
+    def _voice_action_count(self):
+        """
+        Muestra el reporte generado por el Agente sobre la última imagen.
+        """
+        report = self.agent.get_count_report()
+        # Mostramos en un popup y en el log
+        messagebox.showinfo("Reporte: Contar", report)
+        print(f"Agente: {report}")
+
+    def _voice_action_proportion(self):
+        """
+        Muestra el reporte generado por el Agente sobre la inferencia Bayesiana.
+        """
+        report = self.agent.get_proportion_report()
+        messagebox.showinfo("Reporte: Proporción", report)
+        print(f"Agente: {report}")
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ class FeatureExtractor:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         
-        # Definimos explícitamente qué características usaremos para el clustering
+        # Definimos qué características usaremos para el clustering
         self.CLUSTERING_FEATURES = [
             'aspect_ratio',
             'solidity', 
@@ -24,7 +24,15 @@ class FeatureExtractor:
     def extract_features(self, bounding_boxes: List[Tuple], masks: List[np.ndarray]) -> List[Dict[str, Any]]:
         """
         Procesa una lista de objetos detectados y retorna sus características.
+
+        Args:
+            * bounding_boxes (List[Tuple]): Lista de bounding boxes (x, y, w, h).
+            * masks (List[np.ndarray]): Lista de máscaras binarias correspondientes.
+
+        Returns:
+            * List[Dict[str, Any]]: Lista de diccionarios con las características extraidas.
         """
+        # Validacion básica
         if len(bounding_boxes) != len(masks):
             self.logger.warning(f"Desajuste: {len(bounding_boxes)} bboxes y {len(masks)} masks.")
             return []
@@ -33,17 +41,17 @@ class FeatureExtractor:
 
         for i, (bbox, mask) in enumerate(zip(bounding_boxes, masks)):
             try:
-                # 1. Delegar matemática pesada al ContourManager
+                # Delegar matemática pesada al ContourManager
                 manager = ContourManager(mask)
                 props = manager.calculate_all_properties()
 
                 if props is None:
                     continue
 
-                # 2. Aplanar datos para el dataset
+                # Aplanar datos para el dataset
                 obj_data = self._map_properties_to_dict(props, i)
                 
-                # 3. Agregar contexto útil para la UI (no para el KMeans)
+                # Agregar contexto útil para la UI (no para el KMeans)
                 obj_data['bbox'] = bbox 
                 
                 features_list.append(obj_data)
@@ -57,7 +65,6 @@ class FeatureExtractor:
     def _map_properties_to_dict(self, p: Any, obj_id: int) -> Dict[str, float]:
         """
         Transforma el objeto GeometricProperties en un diccionario plano.
-        Aquí es donde 'elegimos' qué datos le importan a la IA.
         """
         # Seguridad para Momentos de Hu (por si el contorno es degenerado)
         hu = p.hu_moments if hasattr(p, 'hu_moments') and len(p.hu_moments) >= 3 else [0.0]*7
