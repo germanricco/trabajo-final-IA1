@@ -8,6 +8,7 @@ from typing import Optional, Dict, Union
 # Importamos las clases que ya definimos
 from src.voice.audio_feature_extractor import AudioFeatureExtractor
 from src.voice.knn_model import KNNModel
+from src.voice.config import VoiceConfig
 
 class VoiceRecognizer:
     """
@@ -18,22 +19,37 @@ class VoiceRecognizer:
     3. Gestión de entrenamiento masivo desde carpetas.
     """
 
-    def __init__(self,
-                 model_path: str = "models/voice_model.pkl",
-                 sample_rate: int = 16000,
-                 duration: int = 2,
-                 k_neighbors: int = 5):
-        self.logger = logging.getLogger("VoiceRecognizer")
-        self.model_path = model_path
-        self.sample_rate = sample_rate
-        self.duration = duration
+    def __init__(self, model_path: str = "models/voice_model.pkl", config: VoiceConfig = None):
         
-        # Instancias de los submodulos
-        self.knn = KNNModel(k=k_neighbors)
-        self.extractor = AudioFeatureExtractor(sr=sample_rate)
+        self.model_path = model_path
 
+        # Si no pasan config, usamos el default
+        self.config = config if config is not None else VoiceConfig()
+
+        # Interacción con hardware
+        self.duration = self.config.duration
+        self.sample_rate = self.config.sample_rate
+
+        # === Configuracion de Componentes ===
+        self.extractor = AudioFeatureExtractor(
+            sr=self.config.sample_rate,
+            top_db=self.config.top_db,
+            pre_emphasis_coef=self.config.pre_emphasis_coef,
+            lowcut=self.config.lowcut,
+            highcut=self.config.highcut,
+            filter_order=self.config.filter_order,
+            n_mfcc=self.config.n_mfcc
+        )
+
+        self.knn = KNNModel(
+            k=self.config.k_neighbors
+        )
+        
         # Estado
         self.is_ready = False
+
+        self.logger = logging.getLogger("VoiceRecognizer")
+        self.logger.info("Inicializando VoiceRecognizer.")
 
     def load_model(self) -> bool:
         """
@@ -44,9 +60,9 @@ class VoiceRecognizer:
         
         if success:
             self.is_ready = True
-            self.logger.info(f"✅ Modelo de voz cargado desde: {self.model_path}")
+            self.logger.info(f"Modelo de voz cargado desde: {self.model_path}")
         else:
-            self.logger.warning(f"⚠️ No se pudo cargar el modelo de voz en: {self.model_path}")
+            self.logger.warning(f"No se pudo cargar el modelo de voz en: {self.model_path}")
             self.is_ready = False
             
         return success
@@ -57,7 +73,7 @@ class VoiceRecognizer:
         Guarda el modelo.
         """
         self.knn.save(self.model_path)
-        self.logger.info(f"💾 Modelo guardado exitosamente en: {self.model_path}")
+        self.logger.info(f"Modelo guardado exitosamente en: {self.model_path}")
 
 
     def train(self, dataset_path: str) -> bool:
@@ -75,14 +91,14 @@ class VoiceRecognizer:
         y = []
 
         if not os.path.exists(dataset_path):
-            self.logger.error("❌ Directorio de dataset no encontrado.")
+            self.logger.error("Directorio de dataset no encontrado.")
             return False
 
         # Obtener subcarpetas (clases)
         classes = [d for d in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, d))]
         
         if not classes:
-            self.logger.error("❌ No se encontraron carpetas de clases en el dataset.")
+            self.logger.error("No se encontraron carpetas de clases en el dataset.")
             return False
         
         # Recorrer carpetas
@@ -93,7 +109,7 @@ class VoiceRecognizer:
             # Listar archivos .wav
             wav_files = [f for f in os.listdir(folder_path) if f.endswith('.wav')]
 
-            self.logger.info(f"   📂 Procesando clase '{label}' ({len(wav_files)} audios)...")
+            self.logger.info(f"Procesando clase '{label}' ({len(wav_files)} audios)...")
             
             # Recorrer archivos .wav
             for wav in wav_files:
@@ -108,7 +124,7 @@ class VoiceRecognizer:
                     count_files += 1
 
         if count_files == 0:
-            self.logger.error("❌ No se generaron características válidas. Revise los audios.")
+            self.logger.error("No se generaron características válidas. Revise los audios.")
             return False
 
         # Entrenamiento y persistencia
@@ -116,7 +132,7 @@ class VoiceRecognizer:
         self.is_ready = True
         self.save_model()
         
-        self.logger.info(f"✅ Entrenamiento finalizado. Total muestras: {count_files}")
+        self.logger.info(f"Entrenamiento finalizado. Total muestras: {count_files}")
         return True
 
 
@@ -132,7 +148,7 @@ class VoiceRecognizer:
             return "ERROR_MODEL_NOT_LOADED"
 
         try:
-            self.logger.info(f"🎤 Escuchando ({self.duration}s)...")
+            self.logger.info(f"Escuchando ({self.duration}s)...")
             
             # 1. Grabación (Bloqueante)
             audio_data = sd.rec(
@@ -156,7 +172,7 @@ class VoiceRecognizer:
             # 3. Predicción
             label, confidence = self.knn.predict(features)
             
-            self.logger.info(f"🗣️ Comando: '{label.upper()}' | Confianza: {confidence:.2f}")
+            self.logger.info(f"Comando: '{label.upper()}' | Confianza: {confidence:.2f}")
             
             # Umbral de confianza
             if confidence < 0.5:
@@ -166,5 +182,5 @@ class VoiceRecognizer:
             return label
 
         except Exception as e:
-            self.logger.error(f"❌ Error crítico en micrófono/predicción: {e}")
+            self.logger.error(f"Error crítico en micrófono/predicción: {e}")
             return "ERROR_MIC"

@@ -2,6 +2,7 @@ import numpy as np
 import collections
 import pickle
 import os
+import logging
 
 class KNNModel:
     """
@@ -13,6 +14,9 @@ class KNNModel:
         self.labels = None
         self.n_examples = 0
         self.is_trained = False
+
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"KNN Model inicializado correctamente.")
 
     def fit(self, features, labels):
         """
@@ -36,7 +40,6 @@ class KNNModel:
             
         Returns:
             * tuple: (Etiqueta Predicha, Confianza)
-                   Ej: ('contar', 0.66) si 2 de 3 vecinos dijeron 'contar'.
         """
         if not self.is_trained:
             raise ValueError("El modelo no ha sido entrenado ni cargado.")
@@ -90,5 +93,5 @@ class KNNModel:
             self.is_trained = True
             return True
         except Exception as e:
-            print(f"Error cargando modelo KNN: {e}")
+            self.logger.error(f"Error cargando modelo KNN: {e}")
             return False

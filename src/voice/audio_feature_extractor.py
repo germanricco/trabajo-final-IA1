@@ -1,23 +1,39 @@
 import numpy as np
 import librosa
 from scipy.signal import butter, lfilter
+import logging
 
 class AudioFeatureExtractor:
     def __init__(self,
                  sr=16000,
-                 n_mfcc=13,
-                 pre_emphasis_coef=0.97):
+                 top_db=20,
+                 pre_emphasis_coef=0.97,
+                 lowcut=200,
+                 highcut=5500,
+                 filter_order=5,
+                 n_mfcc=13):
         """
         Inicializa el extractor de caracteristicas de audio.
 
         Args:
             * sr (int): Sample Rate.
+            * top_db (int): Umbral en decibelios para eliminar silencios.
+            * lowcut (float): Frecuencia de corte baja en Hz.
+            * highcut (float): Frecuencia de corte alta en Hz.
             * n_mfcc (int): Número de coeficientes MFCC a extraer (13 es estandard).
             * pre_emphasis_coef (float): Coeficiente para el filtro de pre-énfasis.
         """
         self.sr = sr
-        self.n_mfcc = n_mfcc
+        self.top_db = top_db
         self.pre_emphasis_coef = pre_emphasis_coef 
+        self.lowcut = lowcut
+        self.highcut = highcut
+        self.filter_order = filter_order
+        self.n_mfcc = n_mfcc
+
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"AudioFeatureExtractor inicializado correctamente.")
+        
 
     
     def extract_features(self, audio_input):
@@ -40,13 +56,13 @@ class AudioFeatureExtractor:
                 signal = audio_input
             
             # Eliminar silencios al inicio y final
-            signal = self._remove_silence(signal)
+            signal = self._remove_silence(signal, top_db=self.top_db)
 
             # Pre-enfasis (balancear espectro de frecuencias)
-            signal = self._pre_emphasis(signal)
+            signal = self._pre_emphasis(signal, emphasis_coef=self.pre_emphasis_coef)
 
             # Aplicar el filtro pasa banda
-            signal = self._bandpass_filter(signal)
+            signal = self._bandpass_filter(signal, lowcut=self.lowcut, highcut=self.highcut, order=self.filter_order)
             
             # Normalizar la señal
             signal = self._normalize_audio(signal)
@@ -70,16 +86,16 @@ class AudioFeatureExtractor:
             return features
 
         except Exception as e:
-            print(f"❌ Error extrayendo características de audio: {e}")
+            self.logger.error(f"Error extrayendo características de audio: {e}")
             return None
         
 
-    def _pre_emphasis(self, y):
+    def _pre_emphasis(self, y, emphasis_coef=0.97):
         """
         Aplica un filtro de pre-énfasis a la señal de audio.
         Realiza frecuencias altas, compensando la caída natural en esas frecuencias.
         """
-        return librosa.effects.preemphasis(y, coef=self.pre_emphasis_coef)
+        return librosa.effects.preemphasis(y, coef=emphasis_coef)
 
 
     def _bandpass_filter(self, y, lowcut=200, highcut=5500, order=5):

@@ -11,29 +11,37 @@ from src.vision.segmentator import Segmentator
 from src.vision.features import FeatureExtractor
 from src.vision.data_prep import DataPreprocessor
 from src.vision.kmeans import KMeansModel
+from src.vision.config import VisionConfig
 
 class ImageClassifier:
     """
     Subsistema de Vision: Encapsula toda la complejidad del ML (K-Means).
     """
 
-    def __init__(self, models_dir="models"):
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, models_dir="models", config: VisionConfig = None):
+        self.logger = logging.getLogger("ImageClassifier.")
         self.models_dir = models_dir
 
-        # Configuracion de Componentes
-        self.img_prep = ImagePreprocessor(target_size = (960,1280),
-                                gamma = 1.7,
-                                d_bFilter = 8,
-                                binarization_block_size = 27,
-                                binarization_C = -4,
-                                open_kernel_size = (3, 3),
-                                close_kernel_size = (3, 3),
-                                clear_border_margin = 5)
+        # Si no pasan config, usamos el default
+        self.config = config if config is not None else VisionConfig()
+        
+        self.logger.info("Inicializando ImageClassifier")
+
+        # === Configuracion de Componentes ===
+        self.img_prep = ImagePreprocessor(
+            target_size = self.config.target_size,
+            gamma = self.config.gamma,
+            d_bFilter = self.config.d_bFilter,
+            binarization_block_size = self.config.binarization_block_size,
+            binarization_C = self.config.binarization_C,
+            open_kernel_size = self.config.open_kernel_size,
+            close_kernel_size = self.config.close_kernel_size,
+            clear_border_margin = self.config.clear_border_margin
+        )
     
         self.segmentator = Segmentator(
-            min_area = 100,
-            merge_distance = 15
+            min_area = self.config.min_area,
+            merge_distance = self.config.merge_distance
         )
 
         self.feature_extractor = FeatureExtractor()
@@ -41,18 +49,12 @@ class ImageClassifier:
         self.data_prep = DataPreprocessor()
 
         self.model = KMeansModel(
-            n_clusters=4,
-            n_init=50
+            n_clusters=self.config.n_clusters,
+            n_init=self.config.n_init
         )
 
-        # Pesos definidos para cada feature
-        self.feature_weights = {
-            'radius_variance': 7.0,     # Apoyo para circle_ratio
-            'circle_ratio': 16.0,       # Principal separador entre tuercas vs. arandelas
-            'hole_confidence': 2.0,
-            'aspect_ratio': 3.0,
-            'solidity': 1.0,
-        }
+        # Pesos (weights) para cada feature
+        self.feature_weights = self.config.feature_weights
 
         self.cluster_mapping = {}
         self.is_ready = False
@@ -114,39 +116,9 @@ class ImageClassifier:
         results = []
         filename = os.path.basename(image_path)
         
-        self.logger.info(f"--- 🔍 INFERENCIA: {filename} ({len(cluster_ids)} objetos) ---")
-        
         for i, cid in enumerate(cluster_ids):
             label = self.cluster_mapping.get(cid, "desconocido")
             raw_feats = features_list[i]
-            
-            # --- LOGS DE DEBUG (La "Radiografía") ---
-            # Solo se verán si configuras logging.setLevel(logging.DEBUG)
-            debug_msg = [f"\n   OBJETO #{i} -> Predicción: [{label.upper()}] (Cluster {cid})"]
-            
-            # Análisis específico según tipo
-            if raw_feats.get('hole_confidence', 0) > 0.5:
-                # Caso Tuerca/Arandela
-                c_ratio = raw_feats.get('circle_ratio', 0)
-                rad_var = raw_feats.get('radius_variance', 0)
-                debug_msg.append(f"     ├─ ⭕ Circle Ratio: {c_ratio:.4f} (Arandela > 0.90 | Tuerca < 0.88)")
-                debug_msg.append(f"     ├─ 📏 Radius Var:   {rad_var:.4f} (Arandela ~ 0.02 | Tuerca > 0.05)")
-                
-                # Alertas de ambigüedad
-                if label == 'arandelas' and c_ratio < 0.90:
-                    debug_msg.append("     ⚠️  SOSPECHOSO: Clasificado Arandela pero es poco circular.")
-                if label == 'tuercas' and c_ratio > 0.90:
-                    debug_msg.append("     ⚠️  SOSPECHOSO: Clasificado Tuerca pero es muy circular.")
-            else:
-                # Caso Clavo/Tornillo
-                asp_ratio = raw_feats.get('aspect_ratio', 0)
-                solidity = raw_feats.get('solidity', 0)
-                debug_msg.append(f"     ├─ 📏 Aspect Ratio: {asp_ratio:.4f} (Clavo > 15 | Tornillo ~3-8)")
-                debug_msg.append(f"     ├─ ⬛ Solidity:     {solidity:.4f}")
-            
-            self.logger.debug("\n".join(debug_msg))
-            # ----------------------------------------
-
 
             # Recuperamos el bbox que guardamos en el diccionario de features
             bbox = features_list[i].get('bbox')
@@ -157,7 +129,6 @@ class ImageClassifier:
                 "cluster_id": int(cid)
             })
         
-        print(f"Resultados de clasificación para {filename}: {results}")
         return results
 
     def _pipeline_process(self, image_paths_with_labels):
@@ -226,7 +197,7 @@ class ImageClassifier:
         Entrena buscando un modelo que no solo tenga buena precisión,
         sino que logre distinguir las 4 clases fundamentales.
         """
-        self.logger.info(f"🏆 Iniciando Torneo de Entrenamiento ({attempts} rondas)...")
+        self.logger.info(f"Iniciando entrenamiento K-Means con {attempts} intentos.")
         
         best_accuracy = 0.0
         current_weights = self.feature_weights
@@ -235,7 +206,7 @@ class ImageClassifier:
         REQUIRED_CLASSES = {"arandelas", "clavos", "tornillos", "tuercas"}
 
         for i in range(1, attempts + 1):
-            self.logger.debug(f"--- Ronda {i}/{attempts} ---")
+            self.logger.debug(f"Ronda de entrenamiento {i}/{attempts}")
 
             # Carga y División de datos
             train_set, val_set = self.load_and_split_data(data_path, split_ratio=0.8)
@@ -309,15 +280,15 @@ class ImageClassifier:
             
             current_accuracy = hits / len(predictions)
             
-            self.logger.info(f" Ronda {i}: Precisión {current_accuracy:.2%}")
+            self.logger.info(f"Ronda {i}: Precisión {current_accuracy:.2%}")
 
             # Reporte de Errores
             if errors:
-                self.logger.info(f"   ❌ Fallos en Validación ({len(errors)}):")
+                self.logger.info(f"Fallos en Validación ({len(errors)}):")
                 for err in errors:
                     self.logger.info(err)
             else:
-                self.logger.info("   ✅ Validación perfecta (0 errores).")
+                self.logger.info("Validación perfecta (0 errores).")
             
             # 6. Selección del Campeón
             if current_accuracy > best_accuracy:
@@ -329,18 +300,18 @@ class ImageClassifier:
                 self.is_ready = True
                 
                 self.save_model()
-                self.logger.info(f"✨ ¡Nuevo Campeón! ({best_accuracy:.2%}) Guardado.")
+                self.logger.info(f"Nuevo mejor modelo. ({best_accuracy:.2%}) Guardado.")
                 
                 if best_accuracy > 0.98:
-                    self.logger.info("🏆 Precisión sobresaliente alcanzada, finalizando torneo.")
+                    self.logger.info("Precisión minima deseada alcanzada, finalizando entrenamiento.")
                     break
         
         # Restauración final
         if self.is_ready:
             self.load_model()
-            self.logger.info(f"🏁 Torneo finalizado. Ganador: {best_accuracy:.2%}")
+            self.logger.info(f"Entrenamiento finalizado con precisión: {best_accuracy:.2%}")
         else:
-            self.logger.error("❌ Fallo total: Ningún modelo logró identificar las 4 clases.")
+            self.logger.error("Error. Ningún modelo logró identificar las 4 clases.")
             
         return best_accuracy
     
@@ -350,8 +321,8 @@ class ImageClassifier:
         """
         if not self.is_ready:
             return 0.0
-            
-        print("🛡️ Validando modelo con set de prueba...")
+        
+        self.logger.info("Validando modelo con set de prueba")
         val_features, val_labels = self._pipeline_process(val_set_paths)
         
         if not val_features:
@@ -363,7 +334,7 @@ class ImageClassifier:
         # Predicción
         predictions = self.model.predict(X_val)
         
-        # --- Lógica de Diagnóstico ---
+        # Diagnóstico
         hits = 0
         errors = [] # Lista para guardar detalles de los errores
         
@@ -383,43 +354,10 @@ class ImageClassifier:
                 hits += 1
             else:
                 # Guardamos el error para inspección
-                # Intentamos recuperar el nombre del archivo si es posible, 
-                # aunque aquí val_features ya perdió el link directo con el path exacto 
-                # a menos que pasemos el path en _pipeline_process. 
-                # Por ahora mostramos los índices.
-                errors.append(f"❌ Esperaba '{real_label.upper()}' -> Predijo '{predicted_label.upper()}' (Cluster {cluster_id})")
+                errors.append(f"Esperaba '{real_label.upper()}' -> Predijo '{predicted_label.upper()}' (Cluster {cluster_id})")
 
         accuracy = hits / len(predictions)
-        
-        # --- IMPRESIÓN DEL REPORTE ---
-        print(f"\n📊 REPORTE DE CLASIFICACIÓN (Precisión: {accuracy:.2%})")
-        print("-" * 60)
-        
-        # Imprimir Matriz de Confusión bonita
-        header = f"{'REAL / PRED':<15} | " + " | ".join([f"{c[:4].upper():<4}" for c in classes])
-        print(header)
-        print("-" * 60)
-        
-        for real in classes:
-            row_str = f"{real:<15} | "
-            for pred in classes:
-                count = confusion_matrix[real][pred]
-                # Resaltar errores visualmente con un asterisco si count > 0 y real != pred
-                marker = "*" if count > 0 and real != pred else " "
-                row_str += f"{count}{marker:<3} | "
-            print(row_str)
-            
-        print("-" * 60)
-        
-        if errors:
-            print(f"\n⚠️  DETALLE DE ERRORES ({len(errors)} casos):")
-            for err in errors[:10]: # Mostramos los primeros 10 para no saturar
-                print(f"   {err}")
-            if len(errors) > 10:
-                print(f"   ... y {len(errors)-10} más.")
-        else:
-            print("\n✨ ¡CLASIFICACIÓN PERFECTA EN VALIDACIÓN!")
-
+        self.logger.info(f"Validación completada. Precisión: {accuracy:.2%}")
         return accuracy
     
     def _create_cluster_mapping(self, cluster_ids, true_labels):
@@ -435,16 +373,36 @@ class ImageClassifier:
                 self.cluster_mapping[k] = "desconocido"
 
     def save_model(self):
+        """
+        Guarda el modelo de visión en un archivo en disco.
+
+        El archivo generado contendrá un diccionario con las siguientes claves:
+        - "model": El objeto del modelo entrenado.
+        - "mapping": Un diccionario que asigna una etiqueta mayoritaria a cada cluster.
+        - "prep": Un objeto DataPreprocessor que contiene la normalización entrenada.
+
+        El archivo se guarda en la carpeta "models" con el nombre "vision_model.pkl".
+        """
         with open(os.path.join(self.models_dir, "vision_model.pkl"), "wb") as f:
             pickle.dump({
                 "model": self.model,
                 "mapping": self.cluster_mapping,
                 "prep": self.data_prep
             }, f)
-        print("💾 Sistema de visión guardado.")
+        self.logger.info("Modelo de visión guardado en disco.")
 
     def load_model(self):
-        path = os.path.join(self.models_dir, "vision_system.pkl")
+        """
+        Carga el modelo de visión desde un archivo en disco.
+
+        El archivo debe contener un diccionario con las siguientes claves:
+        - "model": El objeto del modelo entrenado.
+        - "mapping": Un diccionario que asigna una etiqueta mayoritaria a cada cluster.
+        - "prep": Un objeto DataPreprocessor que contiene la normalización entrenada.
+
+        Retorna True si el modelo se cargó correctamente, False en caso contrario.
+        """
+        path = os.path.join(self.models_dir, "vision_model.pkl")
         if os.path.exists(path):
             with open(path, "rb") as f:
                 data = pickle.load(f)
@@ -452,5 +410,6 @@ class ImageClassifier:
                 self.cluster_mapping = data["mapping"]
                 self.data_prep = data["prep"] # Restauramos el normalizador entrenado
                 self.is_ready = True
+            self.logger.info(f"Modelo Cargado desde {path}.")
             return True
         return False

@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import logging
 from typing import Tuple, Optional
 from dataclasses import dataclass
 
@@ -111,7 +110,6 @@ class ContourManager:
         self.mask = mask.astype(np.uint8)
         self._properties: Optional[GeometricProperties] = None
         self._calculated = False
-        self.logger = logging.getLogger(__name__)
     
     def calculate_all_properties(self) -> GeometricProperties:
         """

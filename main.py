@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import threading
 import os
+from pathlib import Path
+import logging
 
 # Importar arquitectura modular
 from src.core.agent import HardwareAgent
@@ -22,6 +24,9 @@ class App:
         # Configuracion de estilo
         style = ttk.Style()
         style.theme_use("clam")
+
+        self.logger = logging.getLogger("MainAPP")
+        self.root_path = Path(__file__).resolve().parent
 
         # Backend: Instanciar Agente
         self.agent = HardwareAgent()
@@ -68,7 +73,8 @@ class App:
             on_predict=self.run_analysis,
             on_train=self.run_training,
             on_load_model=self.load_existing_model,
-            on_reset=self.reset_batch
+            on_reset=self.reset_batch,
+            on_voice_train=self.run_voice_training
         )
         self.ctrl_panel.pack(side="top", fill="x")
         
@@ -130,10 +136,18 @@ class App:
 
 
     def reset_batch(self):
-        """Reinicia la memoria del estimador bayesiano."""
+        """
+        Reinicia la memoria del estimador bayesiano y limpia la UI.
+        """
         if messagebox.askyesno("Reset", "¿Reiniciar lote?"):
+            # Reiniciar logica interna de estimador bayesiano
             self.agent.reset_estimation()
+
+            # Reiniciar paneles visuales
             self.stats_panel.reset_view()
+            self.vision_panel.clear_image()
+
+            # Feedback en barra de estado
             self.status_footer.set_text("🔄 Lote reiniciado.")
 
 
@@ -234,6 +248,47 @@ class App:
             
         else:
             self.status_footer.set_text(f"Comando '{command}' desconocido")
+
+
+    def run_voice_training(self):
+        """
+        Ejecuta el entrenamiento del modelo de voz.
+        Determina la ruta absoluta de los datos y maneja el feedback UI.
+        """
+        # 1. Confirmación de seguridad
+        if not messagebox.askyesno("Entrenar Voz", "¿Desea re-entrenar el modelo de voz?\nEsto puede tomar unos segundos."):
+            return
+
+        # 2. Definición Robusta de la Ruta
+        # Asumimos estructura: raiz_proyecto/data/raw/audio
+        data_path = self.root_path / "data" / "raw" / "audio"
+
+        if not data_path.exists():
+            self.logger.error(f"Ruta de dataset no encontrada: {data_path}")
+            messagebox.showerror("Error", f"No se encuentra la carpeta de audios:\n{data_path}")
+            return
+
+        # 3. Feedback visual "Cargando"
+        self.status_footer.set_text("🎙️ Entrenando modelo de voz... Por favor espere.")
+        self.root.update_idletasks() # Fuerza a la UI a actualizarse antes de congelarse por el proceso
+
+        try:
+            # 4. Ejecución
+            success = self.agent.train_voice_system(data_path=str(data_path))
+
+            # 5. Resultado
+            if success:
+                self.status_footer.set_text("✅ Voz entrenada correctamente.")
+                self.logger.info("Entrenamiento de voz finalizado con éxito.")
+                messagebox.showinfo("Éxito", "El modelo de reconocimiento de voz ha sido actualizado.")
+            else:
+                self.status_footer.set_text("❌ Error en entrenamiento de voz.")
+                messagebox.showerror("Error", "Ocurrió un error durante el entrenamiento.\nRevise la consola para más detalles.")
+
+        except Exception as e:
+            self.logger.exception("Excepción no controlada durante el entrenamiento de voz")
+            self.status_footer.set_text("❌ Error crítico.")
+            messagebox.showerror("Error Crítico", f"Ocurrió una excepción:\n{str(e)}")
 
     # --- ACCIONES ESPECÍFICAS DE VOZ ---
 

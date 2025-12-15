@@ -3,6 +3,7 @@ from tkinter import ttk
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from PIL import Image, ImageTk
+import logging
 
 class VisionPanel(tk.Frame):
     """
@@ -13,6 +14,8 @@ class VisionPanel(tk.Frame):
         super().__init__(parent, bg="#2c3e50", padx=10, pady=10)
         self.view_width = width
         self.view_height = height
+
+        self.logger = logging.getLogger("VisionPanel")
         
         self.preprocessor = preprocessor
 
@@ -67,7 +70,7 @@ class VisionPanel(tk.Frame):
         """
         
         if not self.current_image: 
-            print("⚠️ UI: No hay imagen cargada para dibujar encima.")
+            self.logger.warning("No hay imagen cargada.")
             return
         
         self.canvas.delete("overlay")
@@ -98,8 +101,6 @@ class VisionPanel(tk.Frame):
                 x2 = ((x_real + w_real_box) * self.scale_factor_ui) + self.offset_x
                 y2 = ((y_real + h_real_box) * self.scale_factor_ui) + self.offset_y
                 
-                print(f"   -> Obj {i} ({label}): BBoxOriginal={bbox_proc} -> Canvas=({x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f})")
-
                 color = colors.get(label, "white")
                 
                 # Rectángulo (Tag 'overlay')
@@ -110,11 +111,22 @@ class VisionPanel(tk.Frame):
                                       font=("Arial", 10, "bold"), anchor="sw", tags="overlay")
                                       
             except Exception as e:
-                print(f"❌ Error dibujando objeto {i}: {e}")
+                self.logger.error(f"Error dibujando detección {i}: {e}")
         
         # Forzar actualización visual
         self.canvas.update()
 
+
+    def clear_image(self):
+        """
+        Limpia la imagen de memoria y resetea el canvas.
+        """
+        # Limpiar referencias a la imagen
+        self.current_image = None
+        self.photo_ref = None
+
+        # Borrar contenido del canvas
+        self.canvas.delete("all")
 
 class StatusFooter(tk.Frame):
     """
@@ -180,22 +192,22 @@ class ControlPanel(tk.Frame):
     """
     Panel lateral con botones de acción y gestión del flujo de trabajo.
     """
-    def __init__(self, parent, on_load, on_predict, on_train, on_load_model, on_reset=None):
+    def __init__(self, parent, on_load, on_predict, on_train, on_load_model, on_reset, on_voice_train):
         super().__init__(parent, bg="white") 
-        
-        # --- SECCIÓN 1: OPERACIÓN ---
+
+        # Seccion Vision
         tk.Label(self, text="OPERACIÓN", font=("Segoe UI", 9, "bold"), 
                  bg="white", fg="#95a5a6").pack(fill="x", padx=10, pady=(20, 5), anchor="w")
         
         # Botón Cargar
         self._make_btn("📂 Cargar Imagen", on_load, "#34495e").pack(fill="x", padx=10, pady=5)
         
-        # Botón Predecir (Analizar)
+        # Botón Predecir
         btn_predict = self._make_btn("🧠 ANALIZAR MUESTRA", on_predict, "#27ae60")
         btn_predict.config(font=("Segoe UI", 11, "bold"), pady=8) 
         btn_predict.pack(fill="x", padx=10, pady=5)
 
-        # Botón Reset (Opcional)
+        # Botón Reset
         if on_reset:
             self._make_btn("🔄 Reiniciar Lote", on_reset, "#c0392b").pack(fill="x", padx=10, pady=5)
         
@@ -206,11 +218,20 @@ class ControlPanel(tk.Frame):
         tk.Label(self, text="SISTEMA", font=("Segoe UI", 9, "bold"), 
                  bg="white", fg="#95a5a6").pack(fill="x", padx=10, pady=(5, 5), anchor="w")
 
+        # Boton Cargar Modelo Vision
         self._make_btn("💾 Cargar Modelo", on_load_model, "#7f8c8d").pack(fill="x", padx=10, pady=2)
-        self._make_btn("⚙️ Re-Entrenar IA", on_train, "#d35400").pack(fill="x", padx=10, pady=5)
+
+        # Botón Re-Entrenar IA Vision
+        self._make_btn("⚙️ Entrenar Vision", on_train, "#d35400").pack(fill="x", padx=10, pady=5)
+
+        # Entrenamiento Voz
+        self._make_btn("🎙️ Entrenar Voz", on_voice_train, "#8e44ad").pack(fill="x", padx=10, pady=2)
     
 
     def _make_btn(self, text, cmd, color):
+        """
+        Helper para crear botones con estilo consistente.
+        """
         return tk.Button(self, text=text, command=cmd, bg=color, fg="white", 
                          font=("Segoe UI", 10), cursor="hand2", 
                          relief="flat", activebackground="#2c3e50", activeforeground="white")

@@ -39,7 +39,7 @@ class ImagePreprocessor:
         self.clear_border_margin = clear_border_margin
 
         self.logger = logging.getLogger(__name__)
-        self.logger.info("✅ ImagePreprocessor inicializado correctamente")
+        self.logger.info("ImagePreprocessor inicializado correctamente.")
 
 
     def process(self, image: np.ndarray) -> np.ndarray:
@@ -293,6 +293,7 @@ class ImagePreprocessor:
             
         return image
     
+
     def scale_bbox_back(self, bbox_processed, original_shape):
         """
         Convierte un Bounding Box del espacio procesado (ej: 800x600 con padding)
@@ -329,6 +330,7 @@ class ImagePreprocessor:
 
         return (x_final, y_final, w_final, h_final)
     
+
     def scale_mask_back(self, processed_mask: np.ndarray, original_shape: tuple) -> np.ndarray:
         """
         Devuelve la máscara al tamaño original, eliminando el padding (barras negras)

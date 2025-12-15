@@ -21,8 +21,9 @@ class Segmentator:
 
         self.min_area = min_area
         self.merge_distance = merge_distance
+
         self.logger = logging.getLogger(__name__)
-        self.logger.info("✅ Segmentator inicializado correctamente")
+        self.logger.info("Segmentator inicializado correctamente.")
 
     def process(self, binary_image: np.ndarray) -> Dict:
         """

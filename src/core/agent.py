@@ -3,11 +3,9 @@ import os
 from collections import Counter
 from typing import List, Dict, Optional, Any
 
-# Importacion de subsistema de vision
+# Importacion de subsistemas
 from src.vision.classifier import ImageClassifier
-# Importacion de subsistema de estimacion bayesiana
 from src.analysis.estimation import BoxEstimator
-# Importacion de subsistema de voz
 from src.voice.voice_recognizer import VoiceRecognizer
 
 class HardwareAgent:
@@ -20,6 +18,7 @@ class HardwareAgent:
     3. Inferencia Bayesiana
 
     Ademas mantiene el estado de la sesion actual (conteo acumulado y ultima deteccion)
+    y proporciona UI
     """
     
     def __init__(self, models_dir: str = "models"):
@@ -53,11 +52,21 @@ class HardwareAgent:
         Inicializa y carga el modelo de vision artificial
         """
         try:
+            # Carga la configuración estandar
             self.vision = ImageClassifier(models_dir=self.models_dir)
+
+            # Carga personalizada del modelo
+            # custom_config = VisionConfig(
+            #   gamma = 1.5,
+            #   feature_weights = { ... }
+            # )
+            #
+            # self.vision = ImageClassifier(models_dir=self.models_dir, config=custom_config)
+
             if self.vision.load_model():
-                self.logger.info("✅ Sistema de visión listo.")
+                self.logger.info("Sistema de visión listo.")
             else:
-                self.logger.warning("⚠️ Sistema de visión NO entrenado.")
+                self.logger.warning("Sistema de visión NO entrenado.")
         except Exception as e:
             self.logger.error(f"Error critico inicializando subsistema de vision: {e}")
     
@@ -75,9 +84,9 @@ class HardwareAgent:
             
             # Intentamos cargar el modelo si existe
             if self.voice.load_model():
-                self.logger.info("✅ Sistema de voz listo y cargado.")
+                self.logger.info("Sistema de voz listo y cargado.")
             else:
-                self.logger.warning("⚠️ Sistema de voz inicializado pero NO entrenado.")
+                self.logger.warning("Sistema de voz inicializado pero NO entrenado.")
         except Exception as e:
             self.logger.error(f"Error crítico inicializando voz: {e}")
 
@@ -118,6 +127,7 @@ class HardwareAgent:
             self.logger.error(f"Fallo crítico en detección: {e}")
             return []
         
+
     def train_vision_system(self, data_path: str = "data/raw/images/all") -> float:
         """Re-entrena el modelo de vision"""
         if not self.vision:
@@ -164,7 +174,16 @@ class HardwareAgent:
             return False
             
         self.logger.info(f"Solicitando entrenamiento de voz en: {data_path}")
-        return self.voice.train(dataset_path=data_path)
+        
+        # Delegamos la tarea al subsistema de voz
+        success = self.voice.train(dataset_path=data_path)
+        
+        if success:
+            self.logger.info("Modelo de voz actualizado y listo en memoria.")
+        else:
+            self.logger.error("El entrenamiento de voz falló.")
+            
+        return success
     
 
     def get_count_report(self) -> str:
@@ -185,6 +204,7 @@ class HardwareAgent:
             msg += f"- {count} {label}\n"
             
         return msg
+
 
     def get_proportion_report(self) -> str:
         """
@@ -249,9 +269,9 @@ class HardwareAgent:
 
     def reset_estimation(self):
         """
-        Llamado por el botón 'Reiniciar Lote.
+        Llamado por el botón 'Reiniciar Lote'.
         """
+        # Reiniciar logica de negocio del estimador
         self.box_estimator.reset()
         self._last_detections = []
         self._session_total_counts = Counter()
-        self.logger.info("Estimación y Contadores de sesion reiniciados.")

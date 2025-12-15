@@ -9,9 +9,7 @@ class FeatureExtractor:
     Selecciona y aplana las características más relevantes para la clasificación.
     """
     
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        
+    def __init__(self):        
         # Definimos qué características usaremos para el clustering
         self.CLUSTERING_FEATURES = [
             'aspect_ratio',
@@ -20,6 +18,9 @@ class FeatureExtractor:
             'circle_ratio',
             'radius_variance',
         ]
+
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"FeatureExtractor inicializado correctamente.")
 
     def extract_features(self, bounding_boxes: List[Tuple], masks: List[np.ndarray]) -> List[Dict[str, Any]]:
         """

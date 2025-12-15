@@ -21,17 +21,19 @@ class KMeansModel:
             * tol: Tolerancia de convergencia. Si los centroides se mueven menos que esto, paramos.
             * n_init: Número de veces que se ejecuta el algoritmo con diferentes centroides iniciales.
         """
+
+        self.logger = logging.getLogger(__name__)
+
+        # Hiperparametros
         self.n_clusters = n_clusters
         self.max_iters = max_iters
         self.tol = tol
         self.n_init = n_init
         
         # Estado del modelo
-        # Forma esperada: (n_clusters, n_features) -> Ej: (4, 5)
         self.centroids = None
         self.inertia_ = None  # Suma de distancias al cuadrado de puntos a sus centroides
         
-        self.logger = logging.getLogger(__name__)
 
     def fit(self, X: np.ndarray):
         """
@@ -49,8 +51,6 @@ class KMeansModel:
         # Validación: No podemos buscar 4 grupos si solo hay 2 datos
         if n_samples < self.n_clusters:
             raise ValueError(f"Datos insuficientes ({n_samples}) para {self.n_clusters} clusters.")
-
-        self.logger.info(f"🧠 Iniciando K-Means con K={self.n_clusters} sobre {n_samples} muestras.")
 
         # Variables para guardar el mejor modelo encontrado en los n_init intentos
         best_inertia = np.inf
@@ -81,7 +81,7 @@ class KMeansModel:
                     self.logger.debug(f"Iteración {i}: Movimiento = {shift:.6f}")
 
                 if shift < self.tol:
-                    self.logger.debug(f"✅ Convergencia alcanzada en iteración {i}. Movimiento: {shift:.6f}")
+                    self.logger.debug(f"Convergencia alcanzada en iteración {i}. Movimiento: {shift:.6f}")
                     break
             
             # Calculamos la Inercia
@@ -96,7 +96,7 @@ class KMeansModel:
         # Al final, nos quedamos con el campeón del torneo
         self.centroids = best_centroids
         self.inertia_ = best_inertia
-        self.logger.info(f"✅ Entrenamiento finalizado. Mejor inercia: {self.inertia_:.4f}")
+        self.logger.info(f"Entrenamiento finalizado. Mejor inercia: {self.inertia_:.4f}")
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """

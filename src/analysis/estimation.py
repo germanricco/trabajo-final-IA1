@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Dict, List
+import logging
 
 class BoxEstimator:
     def __init__(self):
@@ -23,6 +24,9 @@ class BoxEstimator:
         # Estado acumulado
         self.total_observed = 0
         self.evidence_history = {c: 0 for c in self.classes}
+
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"BoxEstimator inicializado correctamente.")
 
     def _calculate_box_probabilities(self):
         """Convierte conteos absolutos a probabilidades logarítmicas para estabilidad numérica."""
