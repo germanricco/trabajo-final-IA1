@@ -2,6 +2,7 @@ import logging
 import os
 from collections import Counter
 from typing import List, Dict, Optional, Any
+import time
 
 # Importacion de subsistemas
 from src.vision.classifier import ImageClassifier
@@ -261,10 +262,18 @@ class HardwareAgent:
         3. Actualiza el estimador bayesiano con los nuevos conteos.
         4. Prepara la respuesta para la UI.
         """
-        # 1. Detectar objetos en la imagen
-        detections = self.detect_objects(image_path)
+        if not self.vision or not self.box_estimator:
+            self.logger.error("Componentes no inicializados.")
+            return {}
+        # Timer total de inicio
+        t_start_total = time.perf_counter()
 
-        # 2. Actualizacion de Memoria
+        # Detectar objetos en la imagen
+        t_start_vision = time.perf_counter()
+        detections = self.detect_objects(image_path)
+        t_end_vision = time.perf_counter()
+
+        # Actualizacion de Memoria
         self._last_detections = detections
 
         labels = [d['label'] for d in detections]
@@ -274,8 +283,10 @@ class HardwareAgent:
         self._session_total_counts.update(current_counts)
         
         # 3. Actualizacion Bayesiana
+        t_start_bayes = time.perf_counter()
         if detections:
             self.box_estimator.update(current_counts)
+        t_end_bayes = time.perf_counter()
 
         # 4. Preparar respuesta para UI
         response = {
@@ -283,6 +294,12 @@ class HardwareAgent:
             "count_in_image": len(detections),
             "estimation_result": self.box_estimator.get_prediction()
         }
+
+        t_end_total = time.perf_counter()
+        self.logger.info(f"Analizadas {len(detections)} piezas.\n"
+                         f"- Tiempo total: {t_end_total-t_start_total:.2f}s\n"
+                         f"- Vision: {t_end_vision-t_start_vision:.2f}s\n"
+                         f"- Bayes: {t_end_bayes-t_start_bayes:.2f}s")
         
         return response
 
