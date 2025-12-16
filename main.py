@@ -17,8 +17,8 @@ class App:
     def __init__(self, root):
         # Configuración de la ventana principal
         self.root = root
-        self.root.title("Sistema de Clasificacion Industrial v2.0")
-        self.root.geometry("1280x800")
+        self.root.title("Sistema de Clasificacion Industrial v3.2")
+        self.root.geometry("1440x900")
         self.root.minsize(1024, 768)
         
         # Configuracion de estilo
@@ -140,6 +140,8 @@ class App:
         Reinicia la memoria del estimador bayesiano y limpia la UI.
         """
         if messagebox.askyesno("Reset", "¿Reiniciar lote?"):
+            # Limpiar referencia al archivo actual
+            self.current_image_path = None
             # Reiniciar logica interna de estimador bayesiano
             self.agent.reset_estimation()
 
@@ -209,6 +211,7 @@ class App:
         # Lanzar Hilo
         threading.Thread(target=self._thread_voice_listener, daemon=True).start()
 
+
     def _thread_voice_listener(self):
         """Hilo secundario que espera al micrófono."""
         # Llamada bloqueante al agente (2 segundos aprox)
@@ -216,6 +219,7 @@ class App:
         
         # Volver al hilo principal
         self.root.after(0, lambda: self._process_voice_result(command))
+
 
     def _process_voice_result(self, command):
         """Se ejecuta en el hilo principal con el resultado."""
@@ -291,7 +295,6 @@ class App:
             messagebox.showerror("Error Crítico", f"Ocurrió una excepción:\n{str(e)}")
 
     # --- ACCIONES ESPECÍFICAS DE VOZ ---
-
     def _voice_action_exit(self):
         if messagebox.askokcancel("Salir", "¿Confirmar salida por voz?"):
             self.root.quit()

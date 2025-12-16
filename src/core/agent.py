@@ -189,20 +189,39 @@ class HardwareAgent:
     def get_count_report(self) -> str:
         """
         Genera el reporte para el comando "CONTAR".
-        Devuelve texto listo para ser leído o mostrado.
+        Muestra el conteo ordenado alfabéticamente para facilitar la comparación.
         """
         if not self._last_detections:
             return "No hay ninguna muestra analizada recientemente."
 
-        # Analizamos lo que hay en la ÚLTIMA imagen (Contexto inmediato)
-        labels = [d['label'] for d in self._last_detections]
-        counts = Counter(labels)
+        # 1. Datos Imagen Actual
+        current_labels = [d['label'] for d in self._last_detections]
+        current_counts = Counter(current_labels)
+        total_current = len(self._last_detections)
         
-        # Construimos el mensaje
-        msg = f"En esta muestra detecté {len(self._last_detections)} piezas.\n"
-        for label, count in counts.items():
-            msg += f"- {count} {label}\n"
-            
+        # 2. Datos Acumulados
+        total_session = sum(self._session_total_counts.values())
+
+        # --- CONSTRUCCIÓN DEL MENSAJE ---
+        msg = f"📊 REPORTE DE CONTEO\n"
+        msg += f"--------------------------------\n"
+        
+        # SECCIÓN 1: ACTUAL (Ordenada Alfabéticamente)
+        msg += f"📸 IMAGEN ACTUAL: {total_current} piezas\n"
+        # Usamos sorted() aquí para garantizar orden A-Z
+        for label, count in sorted(current_counts.items()):
+            msg += f"   • {label.capitalize()}: {count}\n"
+
+        msg += f"\n📦 ACUMULADO SESIÓN: {total_session} piezas\n"
+        
+        # SECCIÓN 2: ACUMULADO (Ordenada Alfabéticamente)
+        if total_session > 0:
+            # Usamos sorted() aquí también
+            for label, count in sorted(self._session_total_counts.items()):
+                msg += f"   • {label.capitalize()}: {count}\n"
+        else:
+            msg += "   (Sin datos acumulados previos)\n"
+
         return msg
 
 
