@@ -21,16 +21,61 @@ El sistema está diseñado bajo el paradigma de Programación Orientada a Obejto
 * **Patrón Facade**: La complejidad del procesamiento de imágenes y señales de audio se oculta detrás de interfaces unificadas ("ImageClassifier" y "VoiceRecognizer").
 * **Inyección de Dependencias**: La configuración de hiperparámetros se desacopla utilizando clases inmutables ("VisionConfig" y "VoiceConfig"), garantizando escalabilidad y fácil mantenimiento.
 
+classDiagram
+    direction TB
+    
+    %% Configuración separada del flujo principal
+    class VisionConfig {
+        +target_size
+        +gamma
+    }
+    
+    class ImageClassifier {
+        +predict(image)
+        +train(data)
+    }
+
+    %% El Facade central
+    VisionConfig <.. ImageClassifier : Inyecta Configuración
+
+    %% Pipeline de procesamiento (El mismo nivel jerárquico)
+    ImageClassifier *-- ImagePreprocessor : 1. Limpia
+    ImageClassifier *-- Segmentator : 2. Aísla
+    ImageClassifier *-- FeatureExtractor : 3. Extrae
+    ImageClassifier *-- DataPreprocessor : 4. Normaliza
+    ImageClassifier *-- KMeansModel : 5. Clasifica
+
+    %% Sub-dependencias ocultas al Facade
+    class FeatureExtractor {
+        +extract_features()
+    }
+    class ContourManager {
+        +calculate_properties()
+    }
+    
+    FeatureExtractor *-- ContourManager : Delega cálculo
+
 ## 🧠 Pipeline de Inteligencia Artificial
 
 ### 1. Subsistema de Visión Artificial (K-Means)
 * **Preprocesamiento**: Conversión a escala de grises, normalización espacial, corrección Gamma, filtrado bilateral para preservación de bordes y binarización adaptativa.
-* **Extracción de Características**: Transformación a un vector maximizando la distancia interclase. Se utilizan métricas clave como Relación de Aspecto (Aspect Ratio), Solidez, Factor de Hueco (fundamental para distinguir tuercas/arandelas) y Varianza Radial.
+
+![Salida Etapa de Preprocesamiento](docs/img/preprocessing_results.png)
+
+* **Extracción de Características**: Transformación a un vector maximizando la distancia interclase. Se utilizan métricas clave como:
+a. Relación de Aspecto (Aspect Ratio).
+b. Solidez (Solidity).
+c. Factor de Hueco (Hole Confidence).
+d. Relación Circular (Circle Ratio).
+e. Varianza Radial (Circular Variance).
+
 * **Clasificación**: Agrupamiento en 4 clústeres mediante el algoritmo K-Means, con preprocesamiento previo de estandarización (Z-Score) y ponderación de atributos.
 
 ### 2. Subsistema de Voz (K-Nearest Neighbors)
-* **DSP y Acondicionamiento**: Eliminación de silencios (Trimming), pre-énfasis para realzar frecuencias agudas, y filtrado pasa-banda (200Hz - 5500Hz).
+* **DSP y Acondicionamiento**: Eliminación de silencios (Trimming), pre-énfasis para realzar frecuencias agudas, filtrado pasa-banda (200Hz - 5500Hz) y normalización.
+
 * **Extracción de Huella Sonora**: Pooling de 13 coeficientes Mel-Frequency Cepstral Coefficients (MFCC), Zero Crossing Rate (ZCR) y Energía RMS.
+
 * **Clasificación**: Algoritmo K-NN ($K=5$) con votación por mayoría y estimación de confianza para validar comandos de acción.
 
 ### 3. Estimador Bayesiano
