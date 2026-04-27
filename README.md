@@ -21,40 +21,6 @@ El sistema está diseñado bajo el paradigma de Programación Orientada a Obejto
 * **Patrón Facade**: La complejidad del procesamiento de imágenes y señales de audio se oculta detrás de interfaces unificadas ("ImageClassifier" y "VoiceRecognizer").
 * **Inyección de Dependencias**: La configuración de hiperparámetros se desacopla utilizando clases inmutables ("VisionConfig" y "VoiceConfig"), garantizando escalabilidad y fácil mantenimiento.
 
-classDiagram
-    direction TB
-    
-    %% Configuración separada del flujo principal
-    class VisionConfig {
-        +target_size
-        +gamma
-    }
-    
-    class ImageClassifier {
-        +predict(image)
-        +train(data)
-    }
-
-    %% El Facade central
-    VisionConfig <.. ImageClassifier : Inyecta Configuración
-
-    %% Pipeline de procesamiento (El mismo nivel jerárquico)
-    ImageClassifier *-- ImagePreprocessor : 1. Limpia
-    ImageClassifier *-- Segmentator : 2. Aísla
-    ImageClassifier *-- FeatureExtractor : 3. Extrae
-    ImageClassifier *-- DataPreprocessor : 4. Normaliza
-    ImageClassifier *-- KMeansModel : 5. Clasifica
-
-    %% Sub-dependencias ocultas al Facade
-    class FeatureExtractor {
-        +extract_features()
-    }
-    class ContourManager {
-        +calculate_properties()
-    }
-    
-    FeatureExtractor *-- ContourManager : Delega cálculo
-
 ## 🧠 Pipeline de Inteligencia Artificial
 
 ### 1. Subsistema de Visión Artificial (K-Means)
