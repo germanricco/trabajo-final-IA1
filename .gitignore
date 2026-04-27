@@ -1,2 +1,4 @@
 virt_env_agente
 tests/
+.vscode/
+__pycache__/
