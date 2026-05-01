@@ -35,13 +35,17 @@ El sistema está diseñado bajo el paradigma de Programación Orientada a Obejto
 * **Clasificación**: Agrupamiento en 4 clústeres mediante el algoritmo **K-Means**, con preprocesamiento previo de estandarización (Z-Score) y ponderación de atributos.
 
 ### 2. Subsistema de Voz (K-Nearest Neighbors)
+Este subsistema se encarga de tomar un comando de voz, procesarlo y utilizando el algorirmo K-NN clasificarlo entre los comandos validos "propoción", "contar", "salir", agregando a las clases "ruido" para mejorar la precisión del modelo.
+
+Este proceso se realiza a través de las siguientes etapas:
+
 * **DSP y Acondicionamiento**: Eliminación de silencios (Trimming), pre-énfasis para realzar frecuencias agudas, filtrado pasa-banda (200Hz - 5500Hz) y normalización.
 
 ![Pipeline Procesamiento Digital de Senales](docs/img/pipeline_audio.png)
 
 * **Extracción de Huella Sonora**: Pooling de 13 coeficientes Mel-Frequency Cepstral Coefficients (MFCC), Zero Crossing Rate (ZCR) y Energía RMS.
 
-* **Clasificación**: Algoritmo **K-NN** ($K=5$) con votación por mayoría y estimación de confianza para validar comandos de acción.
+* **Clasificación**: Algoritmo **K-NN** ($K=4$) con votación por mayoría y estimación de confianza para validar comandos de acción.
 
 ### 3. Estimador Bayesiano
 Implementa un filtro recursivo que actualiza la probabilidad de 4 hipótesis de caja (Perfiles A, B, C, D) basándoseen la evidencia visual acumulada.
