@@ -17,9 +17,11 @@ El sistema integra tres pilares tecnológicos para lograr una operación *hands-
 
 El sistema está diseñado bajo el paradigma de Programación Orientada a Obejtos (OOP), implementando una arquitectura de **Agente Basado en Modelos**
 
-**HardwareAgent (Orquestador Central)**: Actúa como el núclo lógico, sincronizando los subsistemas y manteniendo el estado interno de las detecciones. Separa estrictamente la lógica de negocio de la interfaz gráfica.
+* **HardwareAgent (Orquestador Central)**: Actúa como el núclo lógico, sincronizando los subsistemas y manteniendo el estado interno de las detecciones. Separa estrictamente la lógica de negocio de la interfaz gráfica.
 * **Patrón Facade**: La complejidad del procesamiento de imágenes y señales de audio se oculta detrás de interfaces unificadas ("ImageClassifier" y "VoiceRecognizer").
 * **Inyección de Dependencias**: La configuración de hiperparámetros se desacopla utilizando clases inmutables ("VisionConfig" y "VoiceConfig"), garantizando escalabilidad y fácil mantenimiento.
+
+![Diagrama de Clases](docs/img/Diagrama-de-Clases.jpg)
 
 ## 🧠 Pipeline de Inteligencia Artificial
 
