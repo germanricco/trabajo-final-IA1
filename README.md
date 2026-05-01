@@ -30,26 +30,19 @@ El sistema está diseñado bajo el paradigma de Programación Orientada a Obejto
 
 ![Salida Etapa de Preprocesamiento](docs/img/preprocessing_results.png)
 
-* **Extracción de Características**: Transformación a un vector maximizando la distancia interclase. Se utilizan métricas clave como:
-a. Relación de Aspecto (Aspect Ratio).
-b. Solidez (Solidity).
-c. Factor de Hueco (Hole Confidence).
-d. Relación Circular (Circle Ratio).
-e. Varianza Radial (Circular Variance).
+* **Extracción de Características**: Transformación a un vector maximizando la distancia interclase. Se utilizan métricas clave como **Relación de Aspecto** (Aspect Ratio), **Solidez** (Solidity), **Factor de Hueco** (Hole Confidence), **Relación Circular** (Circle Ratio) y **Varianza Radial** (Circular Variance).
 
-* **Clasificación**: Agrupamiento en 4 clústeres mediante el algoritmo K-Means, con preprocesamiento previo de estandarización (Z-Score) y ponderación de atributos.
+* **Clasificación**: Agrupamiento en 4 clústeres mediante el algoritmo **K-Means**, con preprocesamiento previo de estandarización (Z-Score) y ponderación de atributos.
 
 ### 2. Subsistema de Voz (K-Nearest Neighbors)
 * **DSP y Acondicionamiento**: Eliminación de silencios (Trimming), pre-énfasis para realzar frecuencias agudas, filtrado pasa-banda (200Hz - 5500Hz) y normalización.
 
+![Pipeline Procesamiento Digital de Senales](docs/img/pipeline_audio.png)
+
 * **Extracción de Huella Sonora**: Pooling de 13 coeficientes Mel-Frequency Cepstral Coefficients (MFCC), Zero Crossing Rate (ZCR) y Energía RMS.
 
-* **Clasificación**: Algoritmo K-NN ($K=5$) con votación por mayoría y estimación de confianza para validar comandos de acción.
+* **Clasificación**: Algoritmo **K-NN** ($K=5$) con votación por mayoría y estimación de confianza para validar comandos de acción.
 
 ### 3. Estimador Bayesiano
 Implementa un filtro recursivo que actualiza la probabilidad de 4 hipótesis de caja (Perfiles A, B, C, D) basándoseen la evidencia visual acumulada.
 Opera matemáticamente en **dominio logarítmico (Log-Sum-Exp)** para garantizar estabilidad numérica, e integra un factor de suavizado probabilistico para tolerar falsos positivos aislados del sensor óptico.
-
-## 📊 Métricas de Rendimiento
-
-## 🚀 Instalación y Uso
